@@ -6,7 +6,7 @@ from jax import lax, random
 from einops import rearrange, reduce, repeat
 from optax import adam, apply_updates
 
-from flax import linen as nn
+from flax.linen import Module, Sequential, Conv, ConvTranspose, Dense, compact, elu
 from flax.training import train_state
 
 import io
@@ -23,97 +23,97 @@ LATENT_SIZE = 16
 
 # %% Define the neural cellular automata
 
-class Flatten(nn.Module):
-  @nn.compact
+class Flatten(Module):
+  @compact
   def __call__(self, x: ndarray) -> ndarray:
     return rearrange(x, 'b h w c -> b (h w c)')
 
 
-class Elu(nn.Module):
+class Elu(Module):
   alpha: float
 
-  @nn.compact
+  @compact
   def __call__(self, x: ndarray) -> ndarray:
-    return nn.elu(x, alpha=1.0)
+    return elu(x, alpha=1.0)
 
 
-class Encoder(nn.Module):
-  @nn.compact
+class Encoder(Module):
+  @compact
   def __call__(self, x: ndarray) -> ndarray:
-    return nn.Sequential(
+    return Sequential(
       [
-        nn.Conv(features=32, kernel_size=(5, 5), strides=(1, 1), padding=(2, 2)),
+        Conv(features=32, kernel_size=(5, 5), strides=(1, 1), padding=(2, 2)),
         Elu(alpha=1.0),
-        nn.Conv(features=64, kernel_size=(5, 5), strides=(2, 2), padding=(2, 2)),
+        Conv(features=64, kernel_size=(5, 5), strides=(2, 2), padding=(2, 2)),
         Elu(alpha=1.0),
-        nn.Conv(features=128, kernel_size=(5, 5), strides=(2, 2), padding=(2, 2)),
+        Conv(features=128, kernel_size=(5, 5), strides=(2, 2), padding=(2, 2)),
         Elu(alpha=1.0),
-        nn.Conv(features=256, kernel_size=(5, 5), strides=(2, 2), padding=(2, 2)),
+        Conv(features=256, kernel_size=(5, 5), strides=(2, 2), padding=(2, 2)),
         Elu(alpha=1.0),
-        nn.Conv(features=512, kernel_size=(5, 5), strides=(2, 2), padding=(2, 2)),
+        Conv(features=512, kernel_size=(5, 5), strides=(2, 2), padding=(2, 2)),
         Elu(alpha=1.0),
         Flatten(),
-        nn.Dense(256),
+        Dense(256),
       ]
     )(x)
 
 
-class LinearDecoder(nn.Module):
-  @nn.compact
+class LinearDecoder(Module):
+  @compact
   def __call__(self, z: ndarray) -> ndarray:
-    return nn.Dense(2048)(z)
+    return Dense(2048)(z)
 
 
-class BaselineDecoder(nn.Module):
-  @nn.compact
+class BaselineDecoder(Module):
+  @compact
   def __call__(self, z: ndarray) -> ndarray:
-    return nn.Sequential(
+    return Sequential(
       [
-        nn.ConvTranspose(features=256, kernel_size=(5, 5), strides=(2, 2), padding=(2, 2)),
+        ConvTranspose(features=256, kernel_size=(5, 5), strides=(2, 2), padding=(2, 2)),
         Elu(alpha=1.0),
-        nn.ConvTranspose(features=128, kernel_size=(5, 5), strides=(2, 2), padding=(2, 2)),
+        ConvTranspose(features=128, kernel_size=(5, 5), strides=(2, 2), padding=(2, 2)),
         Elu(alpha=1.0),
-        nn.ConvTranspose(features=64, kernel_size=(5, 5), strides=(2, 2), padding=(2, 2)),
+        ConvTranspose(features=64, kernel_size=(5, 5), strides=(2, 2), padding=(2, 2)),
         Elu(alpha=1.0),
-        nn.ConvTranspose(features=32, kernel_size=(5, 5), strides=(2, 2), padding=(2, 2)),
+        ConvTranspose(features=32, kernel_size=(5, 5), strides=(2, 2), padding=(2, 2)),
         Elu(alpha=1.0),
-        nn.ConvTranspose(features=1, kernel_size=(5, 5), strides=(1, 1), padding=(4, 4)),
+        ConvTranspose(features=1, kernel_size=(5, 5), strides=(1, 1), padding=(4, 4)),
       ]
     )(z)
 
 
-class Residual(nn.Module):
-  @nn.compact
+class Residual(Module):
+  @compact
   def __call__(self, x: ndarray) -> ndarray:
     residual = x
-    x = nn.Conv(256, (1, 1), strides=(1, 1))(x)
+    x = Conv(256, (1, 1), strides=(1, 1))(x)
     x = Elu(alpha=1.0)(x)
-    x = nn.Conv(256, (1, 1), strides=(1, 1))(x)
+    x = Conv(256, (1, 1), strides=(1, 1))(x)
     return x + residual
 
 
-class VNCADecoder(nn.Module):
-  @nn.compact
+class VNCADecoder(Module):
+  @compact
   def __call__(self, z: ndarray) -> ndarray:
-    return nn.Sequential(
+    return Sequential(
       [
-        nn.Conv(256, (3, 3), strides=(1, 1)),
+        Conv(256, (3, 3), strides=(1, 1)),
         Residual(),
         Residual(),
         Residual(),
         Residual(),
-        nn.Conv(256, (1, 1), stride=(1, 1)),
+        Conv(256, (1, 1), stride=(1, 1)),
       ]
     )(z)
 
 
-class BaselineVAE(nn.Module):
+class BaselineVAE(Module):
   def setup(self):
     self.encoder = Encoder()
     self.linear_decoder = LinearDecoder()
     self.decoder = BaselineDecoder()
 
-  @nn.compact
+  @compact
   def __call__(self, x, z_rng):
     z_params = self.encoder(x)
     mean, logvar = rearrange(z_params, 'b (c p) -> p b c', c=128, p=2)
@@ -122,10 +122,6 @@ class BaselineVAE(nn.Module):
     z = rearrange(z, 'b (h w c) -> b h w c', h=2, w=2, c=512)
     recon_x = self.decoder(z)
     return recon_x, mean, logvar
-
-  def generate(self, z):
-    return nn.sigmoid(self.decoder(z))
-
 
 def sample(rng, mu, logvar):
   std = np.exp(0.5 * logvar)
