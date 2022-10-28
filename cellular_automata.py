@@ -1,9 +1,11 @@
 # %% Create Neural Cellular Automata using JAX
 
 import jax.numpy as np
-from jax import jit, vmap
-from jax import lax, nn, random
+from jax import jit, vmap, value_and_grad
+from jax import lax, random
+from jax.nn import relu
 from einops import rearrange, reduce, repeat
+from optax import adam, apply_updates
 
 import io
 import requests
@@ -14,6 +16,7 @@ from PIL import Image, ImageDraw
 from jax.numpy import ndarray
 
 TARGET_SIZE = 40
+LATENT_SIZE = 16
 
 # %% Define the neural cellular automata
 @jit
@@ -41,7 +44,7 @@ def percieve(image: ndarray, theta: float) -> ndarray:
       [np.sin(theta), np.cos(theta)]
     ]
   )
-  kernels = np.einsum('ij, jlm -> ilm', rotation, sobel)
+  kernels = np.einsum('ij, jlm -> ilm', rotation, sobel, optimize=True)
   
   f = vmap(convolve, (2, None), -1)
   conv = vmap(f, (None, 0), -1)(image, kernels)
@@ -57,7 +60,7 @@ def nca(params: list[tuple[ndarray]], image: ndarray, theta: float) -> ndarray:
   
   def _predict(params: list, input: ndarray) -> ndarray:
     (w1, b1), (w2, b2) = params
-    h1 = nn.relu(np.dot(w1, input) + b1)
+    h1 = relu(np.dot(w1, input) + b1)
     return np.dot(w2, h1) + b2
   
   change = vmap(_predict, (None, 0), 0)(params, perception)
@@ -89,11 +92,18 @@ def init_network_params(sizes, key, scale=1e-2):
   keys = random.split(key, len(sizes))
   return [random_layer_params(m, n, k, scale) for m, n, k in zip(sizes[:-1], sizes[1:], keys)]
 
-def load_image(url: str) -> ndarray:
+def make_seed(size, latent=LATENT_SIZE):
+  x = np.zeros([size, size, latent], np.float32)
+  x = x.at[size//2, size//2, 3:].set(1.0)
+  return x
+
+def load_image(url: str, target_size:int =TARGET_SIZE) -> ndarray:
   r = requests.get(url)
   img = Image.open(io.BytesIO(r.content))
+  img = img.resize((target_size, target_size))
   img = np.float32(img)/255.0
   # premultiply RGB by Alpha
+  img = img.at[..., :3].set(img[..., :3] * img[..., 3:])
   return img
 
 def load_emoji(emoji: str) -> str:
@@ -106,13 +116,38 @@ img = load_emoji('🥰')
 plt.imshow(img)
 
 # %% Test NCA
-LATENT_SIZE = 4
 params = init_network_params([LATENT_SIZE*3, 32, LATENT_SIZE], random.PRNGKey(0), scale=10)
-output = nca(params, img, theta=0.0)
-output.shape
-
-
-# %%
-plt.imshow(output, cmap='gray')
+seed = make_seed(TARGET_SIZE)
+output = nca(params, seed, theta=0.0)
+plt.imshow(output[..., :3], cmap='gray')
 plt.colorbar()
-# %%
+
+# %% Train NCA
+n_steps = 64
+iterations = 1000
+theta = 0.0
+lr = 2e-3
+params = init_network_params([LATENT_SIZE*3, 32, LATENT_SIZE], random.PRNGKey(0))
+
+def loss(params, img, theta):
+  output = make_seed(TARGET_SIZE)
+  for _ in range(n_steps):
+    output = nca(params, output, theta)
+  return np.mean(np.square(output[..., :4] - img)), output[..., :3].clip(0, 1)
+
+opt = adam(lr)
+opt_state = opt.init(params)
+for iteration in range(iterations):
+
+  (l, out), grads = value_and_grad(loss, has_aux=True)(params, img, theta)
+
+  def norm(x):
+    return x / (np.linalg.norm(x) + 1e-8)
+  
+  grads = [(norm(dw), norm(db)) for (dw, db) in grads]
+  updates, opt_state = opt.update(grads, opt_state)
+  params = apply_updates(params, updates)
+
+  print(f'Iteration {iteration} Loss {l:.4f}')
+  plt.imshow(out, cmap='gray')
+  plt.show()
