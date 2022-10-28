@@ -116,24 +116,30 @@ img = load_emoji('🥰')
 plt.imshow(img)
 
 # %% Test NCA
-params = init_network_params([LATENT_SIZE*3, 32, LATENT_SIZE], random.PRNGKey(0), scale=10)
+params = init_network_params([LATENT_SIZE*3, 128, LATENT_SIZE], random.PRNGKey(0), scale=10)
 seed = make_seed(TARGET_SIZE)
 output = nca(params, seed, theta=0.0)
 plt.imshow(output[..., :3], cmap='gray')
 plt.colorbar()
 
 # %% Train NCA
-n_steps = 64
-iterations = 1000
+n_total_steps = 75
+n_growing_steps = 64
+iterations = 2000
 theta = 0.0
 lr = 2e-3
 params = init_network_params([LATENT_SIZE*3, 32, LATENT_SIZE], random.PRNGKey(0))
 
 def loss(params, img, theta):
+  losses = []
   output = make_seed(TARGET_SIZE)
-  for _ in range(n_steps):
+  for i in range(n_total_steps):
     output = nca(params, output, theta)
-  return np.mean(np.square(output[..., :4] - img)), output[..., :3].clip(0, 1)
+    if i >= n_growing_steps:
+      loss = np.mean((output[..., :4] - img)**2)
+      losses.append(loss)
+
+  return np.mean(np.array(losses)), output[..., :4].clip(0, 1)
 
 opt = adam(lr)
 opt_state = opt.init(params)
@@ -149,5 +155,15 @@ for iteration in range(iterations):
   params = apply_updates(params, updates)
 
   print(f'Iteration {iteration} Loss {l:.4f}')
-  plt.imshow(out, cmap='gray')
-  plt.show()
+
+# %%
+n = 8
+_, im = loss(params, img, 0)
+plt.imshow(im, cmap='gray')
+plt.axis('off')
+plt.show()
+
+# %%
+plt.imshow(img)
+plt.axis('off')
+# %%
