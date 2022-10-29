@@ -154,7 +154,7 @@ def load_image(url: str, target_size: int=TARGET_SIZE) -> ndarray:
   img = img.resize((target_size, target_size))
   img = np.float32(img)/255.0
   img = img.at[..., :3].set(img[..., :3] * img[..., 3:])
-  img = reduce(img, 'h w c -> h w 1', 'mean')
+  img = reduce(img, 'h w c -> h w', 'mean')
   return img
 
 def load_emoji(emoji: str) -> str:
@@ -164,13 +164,27 @@ def load_emoji(emoji: str) -> str:
 
 # %% Load the image
 img = load_emoji('🌗')
+x = rearrange(img, 'h w -> 1 h w')
 plt.imshow(img, cmap='gray')
 plt.show()
 
+# %% Create the model
+model_key = PRNGKey(0)
+vae = BaselineVAE(key=model_key)
+
+# %% Call the model
+recon_x, mean, logvar = vae(x, PRNGKey(0))
+plt.imshow(recon_x[0], cmap='gray')
+
 # %% Train the model
-vae = BaselineVAE(PRNGKey(0))
+lr = 1e-3
+opt = adam(lr)
+opt_state = opt.init(vae)  # not working
+
+n_gradient_steps = 10
+for step in range(n_gradient_steps):
+  value, grads = value_and_grad(loss_fn)(vae, x, PRNGKey(step))
+  updates, opt_state = opt.update(grads, opt_state)
+  vae = apply_updates(vae, updates)
 
 # %%
-loss_fn(vae, rearrange(img, 'h w c -> c h w'), PRNGKey(0))
-# %% Get a table of the model
-#loss_fn.en(vae, img, PRNGKey(0))
