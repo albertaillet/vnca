@@ -19,12 +19,18 @@ from PIL import Image, ImageDraw
 from jax.numpy import ndarray
 from typing import Optional
 
-TARGET_SIZE = 32
+TARGET_SIZE = 28
 LATENT_SIZE = 16
 
-# %% Define the neural cellular automata
+# %% Define the neural nets
 
-Flatten = Lambda(lambda x: rearrange(x, 'h w c -> (h w c)'))
+Flatten = Lambda(lambda x: rearrange(x, 'c h w -> (c h w)'))
+
+def debug(x: ndarray) -> ndarray:
+  print(x.shape)
+  return x
+
+Debug = Lambda(debug)
 
 Elu = Lambda(elu)
 
@@ -46,6 +52,7 @@ class Encoder(Sequential):
       Flatten,
       Linear(in_features=2048, out_features=256, key=keys[5]),
     ])
+
 
 class LinearDecoder(Linear):
   def __init__(self, key):
@@ -119,30 +126,29 @@ class BaselineVAE(Module):
 
     # decode the latent sample
     z = self.linear_decoder(z)
-    z = rearrange(z, '(h w c) -> h w c', h=2, w=2, c=512)
+    z = rearrange(z, '(c h w) -> c h w', h=2, w=2, c=512)
 
     # reconstruct the image
     recon_x = self.decoder(z)
     return recon_x, mean, logvar
 
-def sample(rng, mu, logvar):
+def sample(key: PRNGKey, mu: ndarray, logvar: ndarray) -> ndarray:
   std = np.exp(0.5 * logvar)
   # use the reparameterization trick
-  return mu + std * normal(rng, mu.shape)
+  return mu + std * normal(key, mu.shape)
 
-def loss_fn(model, x, key):
+def loss_fn(model: Module, x: ndarray, key: PRNGKey) -> ndarray:
   recon_x, mean, logvar = model(x, key)
-  print(recon_x.shape, x.shape, mean.shape, logvar.shape)
   recon_loss = np.mean(np.square(recon_x - x))
   kl_loss = -0.5 * np.mean(1 + logvar - np.square(mean) - np.exp(logvar))
   return recon_loss + kl_loss
 
-def make_seed(size, latent=LATENT_SIZE):
+def make_seed(size: int, latent: int=LATENT_SIZE):
   x = np.zeros([size, size, latent], np.float32)
   x = x.at[size//2, size//2, 3:].set(1.0)
   return x
 
-def load_image(url: str, target_size:int =TARGET_SIZE) -> ndarray:
+def load_image(url: str, target_size: int=TARGET_SIZE) -> ndarray:
   r = requests.get(url)
   img = Image.open(io.BytesIO(r.content))
   img = img.resize((target_size, target_size))
@@ -157,12 +163,14 @@ def load_emoji(emoji: str) -> str:
   return load_image(url)
 
 # %% Load the image
-img = load_emoji('🌞')
+img = load_emoji('🌗')
 plt.imshow(img, cmap='gray')
 plt.show()
 
 # %% Train the model
 vae = BaselineVAE(PRNGKey(0))
 
+# %%
+loss_fn(vae, rearrange(img, 'h w c -> c h w'), PRNGKey(0))
 # %% Get a table of the model
-loss_fn(vae, img, PRNGKey(0))
+#loss_fn.en(vae, img, PRNGKey(0))
