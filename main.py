@@ -3,15 +3,15 @@
 import equinox as eqx
 import jax.numpy as np
 from jax.random import PRNGKey, split
-from einops import rearrange, reduce
+from einops import rearrange, repeat
 from optax import adam, exponential_decay
-import matplotlib.pyplot as plt 
+import matplotlib.pyplot as plt
 
 from models import BaselineVAE
 from data_loading import load_emoji
 
 # typing
-from jax import Array
+from jax import Array, vmap
 from equinox import Module
 from typing import Optional, Any
 from jax.random import PRNGKeyArray
@@ -23,7 +23,8 @@ LATENT_SIZE = 16
 # %% Define the neural nets
 @eqx.filter_value_and_grad
 def loss_fn(model: Module, x: Array, key: PRNGKeyArray) -> float:
-    recon_x, mean, logvar = model(x, key)
+    keys = split(key, len(x))
+    recon_x, mean, logvar = vmap(model)(x, keys)
     recon_loss = np.mean(np.square(recon_x - x))
     kl_loss = -0.5 * np.mean(1 + logvar - np.square(mean) - np.exp(logvar))
     return recon_loss + kl_loss
@@ -39,7 +40,7 @@ def make_step(model: Module, x: Array, key: PRNGKeyArray, opt_state: tuple, opti
 
 # %% Load the image
 img = load_emoji('🌗', TARGET_SIZE)
-x = rearrange(img, 'h w -> 1 h w')
+x = repeat(img, 'h w -> 10 1 h w')
 plt.imshow(img, cmap='gray')
 plt.show()
 
@@ -58,7 +59,7 @@ for key in split(model_key, n_gradient_steps):
     print(loss)
 
 # %%
-plt.imshow(vae(x, PRNGKey(0))[0][0], cmap='gray')
+plt.imshow(vae(x[0], PRNGKey(0))[0][0], cmap='gray')
 plt.show()
 plt.imshow(vae.center()[0], cmap='gray')
 plt.show()
