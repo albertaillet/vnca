@@ -1,236 +1,228 @@
-# %% Create Neural Cellular Automata using JAX
+# %% Imports
 
 import jax.numpy as np
-from jax import jit, vmap, value_and_grad
-from jax import lax, random
-from einops import rearrange, reduce, repeat
-from optax import adam, apply_updates
+from jax.random import PRNGKey, split, normal
+from jax.nn import elu
+from einops import rearrange, reduce
+from optax import adam, exponential_decay
 
-from flax.linen import Module, Sequential, Conv, ConvTranspose, Dense, compact, elu
-from flax.training import train_state
+import equinox as eqx
+from equinox import Module
+from equinox.nn import Sequential, Conv2d, ConvTranspose2d, Linear, Lambda
 
 import io
-import optax
 import requests
 import matplotlib.pyplot as plt
 from PIL import Image, ImageDraw
 
 # typing
-from jax.numpy import ndarray
+from jax import Array
+from typing import Optional, Any
+from jax.random import PRNGKeyArray
+from optax import GradientTransformation
 
-TARGET_SIZE = 32
+TARGET_SIZE = 28
 LATENT_SIZE = 16
 
-# %% Define the neural cellular automata
-
-class Flatten(Module):
-  @compact
-  def __call__(self, x: ndarray) -> ndarray:
-    return rearrange(x, 'b h w c -> b (h w c)')
+# %% Define the neural nets
 
 
-class Elu(Module):
-  alpha: float
-
-  @compact
-  def __call__(self, x: ndarray) -> ndarray:
-    return elu(x, alpha=1.0)
+def flatten(x: Array) -> Array:
+    return rearrange(x, 'c h w -> (c h w)')
 
 
-class Encoder(Module):
-  @compact
-  def __call__(self, x: ndarray) -> ndarray:
-    return Sequential(
-      [
-        Conv(features=32, kernel_size=(5, 5), strides=(1, 1), padding=(2, 2)),
-        Elu(alpha=1.0),
-        Conv(features=64, kernel_size=(5, 5), strides=(2, 2), padding=(2, 2)),
-        Elu(alpha=1.0),
-        Conv(features=128, kernel_size=(5, 5), strides=(2, 2), padding=(2, 2)),
-        Elu(alpha=1.0),
-        Conv(features=256, kernel_size=(5, 5), strides=(2, 2), padding=(2, 2)),
-        Elu(alpha=1.0),
-        Conv(features=512, kernel_size=(5, 5), strides=(2, 2), padding=(2, 2)),
-        Elu(alpha=1.0),
-        Flatten(),
-        Dense(256),
-      ]
-    )(x)
+Flatten: Module = Lambda(flatten)
 
 
-class LinearDecoder(Module):
-  @compact
-  def __call__(self, z: ndarray) -> ndarray:
-    return Dense(2048)(z)
+Elu: Module = Lambda(elu)
 
 
-class BaselineDecoder(Module):
-  @compact
-  def __call__(self, z: ndarray) -> ndarray:
-    return Sequential(
-      [
-        ConvTranspose(features=256, kernel_size=(5, 5), strides=(2, 2), padding=(2, 2)),
-        Elu(alpha=1.0),
-        ConvTranspose(features=128, kernel_size=(5, 5), strides=(2, 2), padding=(2, 2)),
-        Elu(alpha=1.0),
-        ConvTranspose(features=64, kernel_size=(5, 5), strides=(2, 2), padding=(2, 2)),
-        Elu(alpha=1.0),
-        ConvTranspose(features=32, kernel_size=(5, 5), strides=(2, 2), padding=(2, 2)),
-        Elu(alpha=1.0),
-        ConvTranspose(features=1, kernel_size=(5, 5), strides=(1, 1), padding=(4, 4)),
-      ]
-    )(z)
+class Encoder(Sequential):
+    def __init__(self, key: PRNGKeyArray):
+        keys = split(key, 6)
+        super().__init__(
+            [
+                Conv2d(1, 32, kernel_size=(5, 5), stride=(1, 1), padding=(4, 4), key=keys[0]),
+                Elu,
+                Conv2d(32, 64, kernel_size=(5, 5), stride=(2, 2), padding=(2, 2), key=keys[1]),
+                Elu,
+                Conv2d(64, 128, kernel_size=(5, 5), stride=(2, 2), padding=(2, 2), key=keys[2]),
+                Elu,
+                Conv2d(128, 256, kernel_size=(5, 5), stride=(2, 2), padding=(2, 2), key=keys[3]),
+                Elu,
+                Conv2d(256, 512, kernel_size=(5, 5), stride=(2, 2), padding=(2, 2), key=keys[4]),
+                Elu,
+                Flatten,
+                Linear(in_features=2048, out_features=256, key=keys[5]),
+            ]
+        )
+
+
+class LinearDecoder(Linear):
+    def __init__(self, key: PRNGKeyArray):
+        super().__init__(in_features=128, out_features=2048, key=key)
+
+
+class BaselineDecoder(Sequential):
+    def __init__(self, key: PRNGKeyArray):
+        keys = split(key, 5)
+        super().__init__(
+            [
+                ConvTranspose2d(512, 256, kernel_size=(5, 5), stride=(2, 2), padding=(2, 2), output_padding=(1, 1), key=keys[0]),
+                #Elu,
+                ConvTranspose2d(256, 128, kernel_size=(5, 5), stride=(2, 2), padding=(2, 2), output_padding=(1, 1), key=keys[1]),
+                #Elu,
+                ConvTranspose2d(128, 64, kernel_size=(5, 5), stride=(2, 2), padding=(2, 2), output_padding=(1, 1), key=keys[2]),
+                #Elu,
+                ConvTranspose2d(64, 32, kernel_size=(5, 5), stride=(2, 2), padding=(2, 2), output_padding=(1, 1), key=keys[3]),
+                #Elu,
+                ConvTranspose2d(32, 1, kernel_size=(5, 5), stride=(1, 1), padding=(4, 4), key=keys[4]),
+            ]
+        )
 
 
 class Residual(Module):
-  @compact
-  def __call__(self, x: ndarray) -> ndarray:
-    residual = x
-    x = Conv(256, (1, 1), strides=(1, 1))(x)
-    x = Elu(alpha=1.0)(x)
-    x = Conv(256, (1, 1), strides=(1, 1))(x)
-    return x + residual
+    conv1: Conv2d
+    conv2: Conv2d
+
+    def __init__(self, key: PRNGKeyArray) -> None:
+        key1, key2 = split(key, 2)
+        self.conv1 = Conv2d(256, 256, kernel_size=(1, 1), stride=(1, 1), key=key1)
+        self.conv2 = Conv2d(256, 256, kernel_size=(1, 1), stride=(1, 1), key=key2)
+
+    def __call__(self, x: Array, key: Optional[PRNGKeyArray] = None) -> Array:
+        res = x
+        x = self.conv1(x)
+        x = elu(x)
+        x = self.conv2(x)
+        return x + res
 
 
-class VNCADecoder(Module):
-  @compact
-  def __call__(self, z: ndarray) -> ndarray:
-    return Sequential(
-      [
-        Conv(256, (3, 3), strides=(1, 1)),
-        Residual(),
-        Residual(),
-        Residual(),
-        Residual(),
-        Conv(256, (1, 1), stride=(1, 1)),
-      ]
-    )(z)
+class VNCADecoder(Sequential):
+    def __init__(self, key: PRNGKeyArray) -> None:
+        keys = split(key, 6)
+        super().__init__(
+            [
+                Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), key=keys[0]),
+                Residual(key=keys[1]),
+                Residual(key=keys[2]),
+                Residual(key=keys[3]),
+                Residual(key=keys[4]),
+                Conv2d(256, 256, kernel_size=(1, 1), stride=(1, 1), key=keys[5]),
+            ]
+        )
 
 
 class BaselineVAE(Module):
-  def setup(self):
-    self.encoder = Encoder()
-    self.linear_decoder = LinearDecoder()
-    self.decoder = BaselineDecoder()
+    encoder: Encoder
+    linear_decoder: LinearDecoder
+    decoder: BaselineDecoder
 
-  @compact
-  def __call__(self, x, z_rng):
-    z_params = self.encoder(x)
-    mean, logvar = rearrange(z_params, 'b (c p) -> p b c', c=128, p=2)
-    z = sample(z_rng, mean, logvar)
-    z = self.linear_decoder(z)
-    z = rearrange(z, 'b (h w c) -> b h w c', h=2, w=2, c=512)
-    recon_x = self.decoder(z)
-    return recon_x, mean, logvar
+    def __init__(self, key: PRNGKeyArray) -> None:
+        key1, key2, key3 = split(key, 3)
+        self.encoder = Encoder(key=key1)
+        self.linear_decoder = LinearDecoder(key=key2)
+        self.decoder = BaselineDecoder(key=key3)
 
-def sample(rng, mu, logvar):
-  std = np.exp(0.5 * logvar)
-  # use the reparameterization trick
-  return mu + std * random.normal(rng, mu.shape)
+    def __call__(self, x: Array, key: PRNGKeyArray) -> tuple[Array, Array, Array]:
+        # get paramets for the latent distribution
+        z_params = self.encoder(x)
 
-def make_seed(size, latent=LATENT_SIZE):
-  x = np.zeros([size, size, latent], np.float32)
-  x = x.at[size//2, size//2, 3:].set(1.0)
-  return x
+        # sample from the latent distribution
+        mean, logvar = rearrange(z_params, '(c p) -> p c', c=128, p=2)
+        z = sample(key, mean, logvar)
 
-def load_image(url: str, target_size:int =TARGET_SIZE) -> ndarray:
-  r = requests.get(url)
-  img = Image.open(io.BytesIO(r.content))
-  img = img.resize((target_size, target_size))
-  img = np.float32(img)/255.0
-  img = img.at[..., :3].set(img[..., :3] * img[..., 3:])
-  img = reduce(img, 'h w c -> h w 1', 'mean')
-  return img
+        # decode the latent sample
+        z = self.linear_decoder(z)
+        z = rearrange(z, '(c h w) -> c h w', h=2, w=2, c=512)
 
-def load_emoji(emoji: str) -> str:
-  code = hex(ord(emoji))[2:].lower()
-  url = 'https://github.com/googlefonts/noto-emoji/blob/main/png/128/emoji_u%s.png?raw=true'%code
-  return load_image(url)
+        # reconstruct the image
+        recon_x = self.decoder(z)
+        return recon_x, mean, logvar
+
+    def center(self) -> Array:
+        c = self.linear_decoder(np.zeros((128)))
+
+        c = rearrange(c, '(c h w) -> c h w', h=2, w=2, c=512)
+        return self.decoder(c)
+
+
+def sample(key: PRNGKeyArray, mu: Array, logvar: Array) -> Array:
+    std: Array = np.exp(0.5 * logvar)
+    # use the reparameterization trick
+    return mu + std * normal(key, mu.shape)
+
+
+@eqx.filter_value_and_grad
+def loss_fn(model: Module, x: Array, key: PRNGKeyArray) -> float:
+    recon_x, mean, logvar = model(x, key)
+    recon_loss = np.mean(np.square(recon_x - x))
+    kl_loss = -0.5 * np.mean(1 + logvar - np.square(mean) - np.exp(logvar))
+    return recon_loss + kl_loss
+
+
+@eqx.filter_jit
+def make_step(model: Module, x: Array, key: PRNGKeyArray, opt_state: tuple, optim: GradientTransformation) -> tuple[float, Module, Any]:
+    loss, grads = loss_fn(model, x, key)
+    updates, opt_state = optim.update(grads, opt_state)
+    model = eqx.apply_updates(model, updates)
+    return loss, model, opt_state
+
+
+def make_seed(size: int, latent: int = LATENT_SIZE):
+    x = np.zeros([size, size, latent], np.float32)
+    x = x.at[size // 2, size // 2, 3:].set(1.0)
+    return x
+
+
+def load_image(url: str, target_size: int = TARGET_SIZE) -> Array:
+    r = requests.get(url)
+    img = Image.open(io.BytesIO(r.content))
+    img = img.resize((target_size, target_size))
+    img = np.float32(img) / 255.0
+    img = img.at[..., :3].set(img[..., :3] * img[..., 3:])
+    img = reduce(img, 'h w c -> h w', 'mean')
+    return img
+
+
+def load_emoji(emoji: str) -> Array:
+    code = hex(ord(emoji))[2:].lower()
+    url = 'https://github.com/googlefonts/noto-emoji/blob/main/png/128/emoji_u%s.png?raw=true' % code
+    return load_image(url)
+
 
 # %% Load the image
-img = load_emoji('🤡')
-plt.imshow(img, cmap='gray')
-plt.show()
+img = load_emoji('🌗')
+x = rearrange(img, 'h w -> 1 h w')
+# plt.imshow(img, cmap='gray')
+# plt.show()
+
+# %% Create the model
+model_key = PRNGKey(0)
+vae = BaselineVAE(key=model_key)
+
+# plt.imshow(vae.center()[0], cmap='gray')
+# plt.show()
+
+# %% Call the model
+# recon_x, mean, logvar = vae(x, PRNGKey(0))
+# plt.imshow(recon_x[0], cmap='gray')
 
 # %% Train the model
-vae = BaselineVAE()
-lr = 1e-2
-rng = random.PRNGKey(0)
-params = vae.init(
-  random.PRNGKey(0), 
-  rearrange(img, 'h w c -> 1 h w c'),
-  random.PRNGKey(0)
-)['params']
-state = train_state.TrainState.create(apply_fn=vae.apply, params=params, tx=adam(lr))
-
-# %% Get a table of the model
-vae.tabulate(
-  random.PRNGKey(0), 
-  rearrange(img, 'h w c -> 1 h w c'),
-  random.PRNGKey(0),
-  console_kwargs = {'force_terminal': False, 'force_jupyter': True}
-)
-
-# %%
-def loss_fn(params, x, rng):
-  recon_x, mean, logvar = vae.apply({'params': params}, x, rng)
-  print(recon_x.shape, x.shape, mean.shape, logvar.shape)
-  recon_loss = np.mean(np.square(recon_x - x))
-  kl_loss = -0.5 * np.mean(1 + logvar - np.square(mean) - np.exp(logvar))
-  return recon_loss + kl_loss
-
-def train_step(state, x, rng):
-  loss, grads = value_and_grad(loss_fn)(state.params, x, rng)
-  state = state.apply_gradients(grads=grads)
-  return state, loss
-
-for epoch in range(100):
-  rng, rng_step = random.split(rng)
-  state, loss = train_step(state, rearrange(img, 'h w c -> 1 h w c'), rng_step)
-  print('Epoch %d, loss %.4f'%(epoch, loss))
-
-
-# %% Train NCA
-n_total_steps = 75
-n_growing_steps = 64
-iterations = 2000
-theta = 0.0
-lr = 2e-3
-
-def loss(params, img, theta):
-  losses = []
-  output = make_seed(TARGET_SIZE)
-  for i in range(n_total_steps):
-    output = nca(params, output, theta)
-    if i >= n_growing_steps:
-      loss = np.mean((output[..., :4] - img)**2)
-      losses.append(loss)
-
-  return np.mean(np.array(losses)), output[..., :4].clip(0, 1)
-
+# lr = 3e-5
+lr = exponential_decay(3e-5, 60, 0.1, staircase=True)
 opt = adam(lr)
-opt_state = opt.init(params)
-for iteration in range(iterations):
+opt_state = opt.init(eqx.filter(vae, eqx.is_array))
 
-  (l, out), grads = value_and_grad(loss, has_aux=True)(params, img, theta)
-
-  def norm(x):
-    return x / (np.linalg.norm(x) + 1e-8)
-  
-  grads = [(norm(dw), norm(db)) for (dw, db) in grads]
-  updates, opt_state = opt.update(grads, opt_state)
-  params = apply_updates(params, updates)
-
-  print(f'Iteration {iteration} Loss {l:.4f}')
-
+n_gradient_steps = 100
+for key in split(model_key, n_gradient_steps):
+    loss, vae, opt_state = make_step(vae, x, key, opt_state, opt)
+    print(loss)
 # %%
-n = 8
-_, im = loss(params, img, 0)
-plt.imshow(im, cmap='gray')
-plt.axis('off')
+
+# It has trained but not very good
+
+plt.imshow(vae(x, PRNGKey(0))[0][0], cmap='gray')
 plt.show()
-
-# %%
-plt.imshow(img)
-plt.axis('off')
-# %%
+plt.imshow(vae.center()[0], cmap='gray')
+plt.show()
