@@ -9,7 +9,7 @@ from equinox.nn import Sequential, Conv2d, ConvTranspose2d, Linear, Lambda
 
 # typing
 from jax import Array
-from typing import Optional, Any
+from typing import Optional, Tuple
 from jax.random import PRNGKeyArray
 
 
@@ -110,7 +110,7 @@ class BaselineVAE(Module):
         self.linear_decoder = LinearDecoder(key=key2)
         self.decoder = BaselineDecoder(key=key3)
 
-    def __call__(self, x: Array, key: PRNGKeyArray) -> tuple[Array, Array, Array]:
+    def __call__(self, x: Array, key: PRNGKeyArray) -> Tuple[Array, Array, Array]:
         # get paramets for the latent distribution
         z_params = self.encoder(x)
 
@@ -144,7 +144,7 @@ class DoublingVNCA(Module):
         self.linear_decoder = LinearDecoder(key=key2)
         self.decoder = VNCADecoder(key=key3)
 
-    def __call__(self, x: Array, key: PRNGKeyArray) -> tuple[Array, Array, Array]:
+    def __call__(self, x: Array, key: PRNGKeyArray) -> Tuple[Array, Array, Array]:
         # get paramets for the latent distribution
         z_params = self.encoder(x)
 

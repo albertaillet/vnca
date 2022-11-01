@@ -12,7 +12,7 @@ from datasets.mnist import load_mnist
 # typing
 from jax import Array, vmap
 from equinox import Module
-from typing import Optional, Any
+from typing import Tuple, Any
 from jax.random import PRNGKeyArray
 from optax import GradientTransformation
 
@@ -31,7 +31,7 @@ def loss_fn(model: Module, x: Array, key: PRNGKeyArray) -> float:
 
 
 @eqx.filter_jit
-def make_step(model: Module, x: Array, key: PRNGKeyArray, opt_state: tuple, optim: GradientTransformation) -> tuple[float, Module, Any]:
+def make_step(model: Module, x: Array, key: PRNGKeyArray, opt_state: Tuple, optim: GradientTransformation) -> Tuple[float, Module, Any]:
     loss, grads = loss_fn(model, x, key)
     updates, opt_state = optim.update(grads, opt_state)
     model = eqx.apply_updates(model, updates)

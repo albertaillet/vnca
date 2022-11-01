@@ -6,10 +6,10 @@ from einops import rearrange
 from tensorflow.keras.datasets import mnist
 
 # typing
-from typing import Iterator
+from typing import Iterator, Tuple
 
 
-def load_mnist(batch_size: int, key: PRNGKeyArray) -> tuple[Iterator, Iterator]:
+def load_mnist(batch_size: int, key: PRNGKeyArray) -> Tuple[Iterator, Iterator]:
     (train_dataset, _), (test_dataset, _) = mnist.load_data()
 
     train_dataset = np.float32(train_dataset) / 255.0
