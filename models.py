@@ -1,30 +1,16 @@
-# %% Imports
-
 import jax.numpy as np
-from jax.random import PRNGKey, split, normal
+from jax.random import split, normal
 from jax.nn import elu
 from einops import rearrange, reduce
-from optax import adam, exponential_decay
 
-import equinox as eqx
 from equinox import Module
 from equinox.nn import Sequential, Conv2d, ConvTranspose2d, Linear, Lambda
 
-import io
-import requests
-import matplotlib.pyplot as plt
-from PIL import Image, ImageDraw
 
 # typing
 from jax import Array
-from typing import Optional, Any
+from typing import Optional, Tuple
 from jax.random import PRNGKeyArray
-from optax import GradientTransformation
-
-TARGET_SIZE = 28
-LATENT_SIZE = 16
-
-# %% Define the neural nets
 
 
 def flatten(x: Array) -> Array:
@@ -69,13 +55,13 @@ class BaselineDecoder(Sequential):
         super().__init__(
             [
                 ConvTranspose2d(512, 256, kernel_size=(5, 5), stride=(2, 2), padding=(2, 2), output_padding=(1, 1), key=keys[0]),
-                #Elu,
+                # Elu,
                 ConvTranspose2d(256, 128, kernel_size=(5, 5), stride=(2, 2), padding=(2, 2), output_padding=(1, 1), key=keys[1]),
-                #Elu,
+                # Elu,
                 ConvTranspose2d(128, 64, kernel_size=(5, 5), stride=(2, 2), padding=(2, 2), output_padding=(1, 1), key=keys[2]),
-                #Elu,
+                # Elu,
                 ConvTranspose2d(64, 32, kernel_size=(5, 5), stride=(2, 2), padding=(2, 2), output_padding=(1, 1), key=keys[3]),
-                #Elu,
+                # Elu,
                 ConvTranspose2d(32, 1, kernel_size=(5, 5), stride=(1, 1), padding=(4, 4), key=keys[4]),
             ]
         )
@@ -124,7 +110,7 @@ class BaselineVAE(Module):
         self.linear_decoder = LinearDecoder(key=key2)
         self.decoder = BaselineDecoder(key=key3)
 
-    def __call__(self, x: Array, key: PRNGKeyArray) -> tuple[Array, Array, Array]:
+    def __call__(self, x: Array, key: PRNGKeyArray) -> Tuple[Array, Array, Array]:
         # get paramets for the latent distribution
         z_params = self.encoder(x)
 
@@ -147,82 +133,44 @@ class BaselineVAE(Module):
         return self.decoder(c)
 
 
+class DoublingVNCA(Module):
+    encoder: Encoder
+    linear_decoder: LinearDecoder
+    decoder: VNCADecoder
+
+    def __init__(self, key: PRNGKeyArray) -> None:
+        key1, key2, key3 = split(key, 3)
+        self.encoder = Encoder(key=key1)
+        self.linear_decoder = LinearDecoder(key=key2)
+        self.decoder = VNCADecoder(key=key3)
+
+    def __call__(self, x: Array, key: PRNGKeyArray) -> Tuple[Array, Array, Array]:
+        # get paramets for the latent distribution
+        z_params = self.encoder(x)
+
+        # sample from the latent distribution
+        mean, logvar = rearrange(z_params, '(c p) -> p c', c=128, p=2)
+        z = sample(key, mean, logvar)
+
+        # decode the latent sample
+        z = self.linear_decoder(z)
+
+        recon_x = z
+        for _ in range(2):
+            recon_x = self.double(recon_x)
+            recon_x = self.decoder(recon_x)
+
+        # reconstruct the image
+        return recon_x, mean, logvar
+
+    def double(self, x: Array) -> Array:
+        x = rearrange(x, 'c h w -> c h w ()')
+        #  x = np.repeat(x, 2, axis=3)
+        x = rearrange(x, 'c h w () -> c h w')
+        return x
+
+
 def sample(key: PRNGKeyArray, mu: Array, logvar: Array) -> Array:
     std: Array = np.exp(0.5 * logvar)
     # use the reparameterization trick
     return mu + std * normal(key, mu.shape)
-
-
-@eqx.filter_value_and_grad
-def loss_fn(model: Module, x: Array, key: PRNGKeyArray) -> float:
-    recon_x, mean, logvar = model(x, key)
-    recon_loss = np.mean(np.square(recon_x - x))
-    kl_loss = -0.5 * np.mean(1 + logvar - np.square(mean) - np.exp(logvar))
-    return recon_loss + kl_loss
-
-
-@eqx.filter_jit
-def make_step(model: Module, x: Array, key: PRNGKeyArray, opt_state: tuple, optim: GradientTransformation) -> tuple[float, Module, Any]:
-    loss, grads = loss_fn(model, x, key)
-    updates, opt_state = optim.update(grads, opt_state)
-    model = eqx.apply_updates(model, updates)
-    return loss, model, opt_state
-
-
-def make_seed(size: int, latent: int = LATENT_SIZE):
-    x = np.zeros([size, size, latent], np.float32)
-    x = x.at[size // 2, size // 2, 3:].set(1.0)
-    return x
-
-
-def load_image(url: str, target_size: int = TARGET_SIZE) -> Array:
-    r = requests.get(url)
-    img = Image.open(io.BytesIO(r.content))
-    img = img.resize((target_size, target_size))
-    img = np.float32(img) / 255.0
-    img = img.at[..., :3].set(img[..., :3] * img[..., 3:])
-    img = reduce(img, 'h w c -> h w', 'mean')
-    return img
-
-
-def load_emoji(emoji: str) -> Array:
-    code = hex(ord(emoji))[2:].lower()
-    url = 'https://github.com/googlefonts/noto-emoji/blob/main/png/128/emoji_u%s.png?raw=true' % code
-    return load_image(url)
-
-
-# %% Load the image
-img = load_emoji('🌗')
-x = rearrange(img, 'h w -> 1 h w')
-# plt.imshow(img, cmap='gray')
-# plt.show()
-
-# %% Create the model
-model_key = PRNGKey(0)
-vae = BaselineVAE(key=model_key)
-
-# plt.imshow(vae.center()[0], cmap='gray')
-# plt.show()
-
-# %% Call the model
-# recon_x, mean, logvar = vae(x, PRNGKey(0))
-# plt.imshow(recon_x[0], cmap='gray')
-
-# %% Train the model
-# lr = 3e-5
-lr = exponential_decay(3e-5, 60, 0.1, staircase=True)
-opt = adam(lr)
-opt_state = opt.init(eqx.filter(vae, eqx.is_array))
-
-n_gradient_steps = 100
-for key in split(model_key, n_gradient_steps):
-    loss, vae, opt_state = make_step(vae, x, key, opt_state, opt)
-    print(loss)
-# %%
-
-# It has trained but not very good
-
-plt.imshow(vae(x, PRNGKey(0))[0][0], cmap='gray')
-plt.show()
-plt.imshow(vae.center()[0], cmap='gray')
-plt.show()
