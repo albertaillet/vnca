@@ -1,7 +1,7 @@
 import jax.numpy as np
 from jax.random import split, normal
 from jax.nn import elu
-from einops import rearrange, reduce
+from einops import rearrange, repeat
 
 from equinox import Module
 from equinox.nn import Sequential, Conv2d, ConvTranspose2d, Linear, Lambda
@@ -18,6 +18,13 @@ def flatten(x: Array) -> Array:
 
 
 Flatten: Module = Lambda(flatten)
+
+
+def double(x: Array) -> Array:
+    return repeat(x, 'c h w -> c (h 2) (w 2)')
+
+
+Double: Module = Lambda(double)
 
 
 Elu: Module = Lambda(elu)
@@ -55,13 +62,13 @@ class BaselineDecoder(Sequential):
         super().__init__(
             [
                 ConvTranspose2d(512, 256, kernel_size=(5, 5), stride=(2, 2), padding=(2, 2), output_padding=(1, 1), key=keys[0]),
-                # Elu,
+                Elu,
                 ConvTranspose2d(256, 128, kernel_size=(5, 5), stride=(2, 2), padding=(2, 2), output_padding=(1, 1), key=keys[1]),
-                # Elu,
+                Elu,
                 ConvTranspose2d(128, 64, kernel_size=(5, 5), stride=(2, 2), padding=(2, 2), output_padding=(1, 1), key=keys[2]),
-                # Elu,
+                Elu,
                 ConvTranspose2d(64, 32, kernel_size=(5, 5), stride=(2, 2), padding=(2, 2), output_padding=(1, 1), key=keys[3]),
-                # Elu,
+                Elu,
                 ConvTranspose2d(32, 1, kernel_size=(5, 5), stride=(1, 1), padding=(4, 4), key=keys[4]),
             ]
         )
@@ -73,8 +80,8 @@ class Residual(Module):
 
     def __init__(self, key: PRNGKeyArray) -> None:
         key1, key2 = split(key, 2)
-        self.conv1 = Conv2d(256, 256, kernel_size=(1, 1), stride=(1, 1), key=key1)
-        self.conv2 = Conv2d(256, 256, kernel_size=(1, 1), stride=(1, 1), key=key2)
+        self.conv1 = Conv2d(128, 128, kernel_size=(1, 1), stride=(1, 1), key=key1)
+        self.conv2 = Conv2d(128, 128, kernel_size=(1, 1), stride=(1, 1), key=key2)
 
     def __call__(self, x: Array, key: Optional[PRNGKeyArray] = None) -> Array:
         res = x
@@ -84,17 +91,17 @@ class Residual(Module):
         return x + res
 
 
-class VNCADecoder(Sequential):
+class NCAStep(Sequential):
     def __init__(self, key: PRNGKeyArray) -> None:
         keys = split(key, 6)
         super().__init__(
             [
-                Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), key=keys[0]),
+                Conv2d(128, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), key=keys[0]),
                 Residual(key=keys[1]),
                 Residual(key=keys[2]),
                 Residual(key=keys[3]),
                 Residual(key=keys[4]),
-                Conv2d(256, 256, kernel_size=(1, 1), stride=(1, 1), key=keys[5]),
+                Conv2d(128, 128, kernel_size=(1, 1), stride=(1, 1), key=keys[5]),
             ]
         )
 
@@ -135,14 +142,14 @@ class BaselineVAE(Module):
 
 class DoublingVNCA(Module):
     encoder: Encoder
-    linear_decoder: LinearDecoder
-    decoder: VNCADecoder
+    step: NCAStep
+    double: Double
 
     def __init__(self, key: PRNGKeyArray) -> None:
-        key1, key2, key3 = split(key, 3)
+        key1, key2 = split(key)
         self.encoder = Encoder(key=key1)
-        self.linear_decoder = LinearDecoder(key=key2)
-        self.decoder = VNCADecoder(key=key3)
+        self.step = NCAStep(key=key2)
+        self.double = Double
 
     def __call__(self, x: Array, key: PRNGKeyArray) -> Tuple[Array, Array, Array]:
         # get paramets for the latent distribution
@@ -151,23 +158,18 @@ class DoublingVNCA(Module):
         # sample from the latent distribution
         mean, logvar = rearrange(z_params, '(c p) -> p c', c=128, p=2)
         z = sample(key, mean, logvar)
+        z = rearrange(z, 'c -> c 1 1')
 
-        # decode the latent sample
-        z = self.linear_decoder(z)
+        # run the doubling and NCA steps
+        K = 4
+        N_nca_steps = 9
+        z = self.double(z)
+        for _ in range(K):
+            for i in range(N_nca_steps):
+                z = z + self.step(z)
+            z = self.double(z)
 
-        recon_x = z
-        for _ in range(2):
-            recon_x = self.double(recon_x)
-            recon_x = self.decoder(recon_x)
-
-        # reconstruct the image
-        return recon_x, mean, logvar
-
-    def double(self, x: Array) -> Array:
-        x = rearrange(x, 'c h w -> c h w ()')
-        #  x = np.repeat(x, 2, axis=3)
-        x = rearrange(x, 'c h w () -> c h w')
-        return x
+        return z, mean, logvar
 
 
 def sample(key: PRNGKeyArray, mu: Array, logvar: Array) -> Array:
