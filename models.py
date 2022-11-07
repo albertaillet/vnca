@@ -118,7 +118,7 @@ class BaselineVAE(Module):
         self.decoder = BaselineDecoder(key=key3)
 
     def __call__(self, x: Array, key: PRNGKeyArray) -> Tuple[Array, Array, Array]:
-        # get paramets for the latent distribution
+        # get parameters for the latent distribution
         z_params = self.encoder(x)
 
         # sample from the latent distribution
@@ -134,8 +134,7 @@ class BaselineVAE(Module):
         return recon_x, mean, logvar
 
     def center(self) -> Array:
-        c = self.linear_decoder(np.zeros((128)))
-
+        c = self.linear_decoder(np.zeros(128))
         c = rearrange(c, '(c h w) -> c h w', h=2, w=2, c=512)
         return self.decoder(c)
 
@@ -145,14 +144,16 @@ class DoublingVNCA(Module):
     step: NCAStep
     double: Double
 
-    def __init__(self, key: PRNGKeyArray) -> None:
+    def __init__(self, key: PRNGKeyArray, K: int = 4, N_nca_steps: int = 9) -> None:
         key1, key2 = split(key)
         self.encoder = Encoder(key=key1)
         self.step = NCAStep(key=key2)
         self.double = Double
+        self.K = K
+        self.N_nca_steps = N_nca_steps
 
     def __call__(self, x: Array, key: PRNGKeyArray) -> Tuple[Array, Array, Array]:
-        # get paramets for the latent distribution
+        # get parameters for the latent distribution
         z_params = self.encoder(x)
 
         # sample from the latent distribution
@@ -161,11 +162,9 @@ class DoublingVNCA(Module):
         z = rearrange(z, 'c -> c 1 1')
 
         # run the doubling and NCA steps
-        K = 4
-        N_nca_steps = 9
         z = self.double(z)
-        for _ in range(K):
-            for i in range(N_nca_steps):
+        for _ in range(self.K):
+            for _ in range(self.N_nca_steps):
                 z = z + self.step(z)
             z = self.double(z)
 
