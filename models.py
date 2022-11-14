@@ -13,21 +13,27 @@ from typing import Optional, Tuple
 from jax.random import PRNGKeyArray
 
 
+def sample(key: PRNGKeyArray, mu: Array, logvar: Array) -> Array:
+    std: Array = np.exp(0.5 * logvar)
+    # use the reparameterization trick
+    return mu + std * normal(key, mu.shape)
+
+
 def flatten(x: Array) -> Array:
     return rearrange(x, 'c h w -> (c h w)')
 
 
-Flatten: Module = Lambda(flatten)
+Flatten: Lambda = Lambda(flatten)
 
 
 def double(x: Array) -> Array:
     return repeat(x, 'c h w -> c (h 2) (w 2)')
 
 
-Double: Module = Lambda(double)
+Double: Lambda = Lambda(double)
 
 
-Elu: Module = Lambda(elu)
+Elu: Lambda = Lambda(elu)
 
 
 class Encoder(Sequential):
@@ -142,7 +148,9 @@ class BaselineVAE(Module):
 class DoublingVNCA(Module):
     encoder: Encoder
     step: NCAStep
-    double: Double
+    double: Lambda
+    K: int
+    N_nca_steps: int
 
     def __init__(self, key: PRNGKeyArray, K: int = 4, N_nca_steps: int = 9) -> None:
         key1, key2 = split(key)
@@ -171,7 +179,28 @@ class DoublingVNCA(Module):
         return z, mean, logvar
 
 
-def sample(key: PRNGKeyArray, mu: Array, logvar: Array) -> Array:
-    std: Array = np.exp(0.5 * logvar)
-    # use the reparameterization trick
-    return mu + std * normal(key, mu.shape)
+class NonDoublingVNCA(Module):
+    encoder: Encoder
+    step: NCAStep
+    N_nca_steps: int
+
+    def __init__(self, key: PRNGKeyArray, N_nca_steps: int = 9) -> None:
+        key1, key2 = split(key)
+        self.encoder = Encoder(key=key1)
+        self.step = NCAStep(key=key2)
+        self.N_nca_steps = N_nca_steps
+
+    def __call__(self, x: Array, key: PRNGKeyArray) -> Tuple[Array, Array, Array]:
+        # get parameters for the latent distribution
+        z_params = self.encoder(x)
+
+        # sample from the latent distribution
+        mean, logvar = rearrange(z_params, '(c p) -> p c', c=128, p=2)
+        z_0 = sample(key, mean, logvar)
+        z = repeat(z_0, 'c -> c h w', h=28, w=28)
+
+        # run the NCA steps
+        for _ in range(self.N_nca_steps):
+            z = z + self.step(z)
+
+        return z, mean, logvar
