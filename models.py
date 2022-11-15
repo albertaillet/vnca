@@ -151,7 +151,7 @@ class BaselineVAE(Module):
         return self.decoder(c)
 
 
-@partial(jit, static_argnames=['n_steps', 'save_steps'])
+@partial(jit, static_argnames=['step', 'n_steps', 'save_steps'])
 def nca_steps(x: Array, step: NCAStep, n_steps: int, save_steps: bool) -> Tuple[Array, Union[Array, None]]:
     def step_fn(z, _) -> Tuple[Array, Union[Array, None]]:
         z = z + step(z)
@@ -162,7 +162,7 @@ def nca_steps(x: Array, step: NCAStep, n_steps: int, save_steps: bool) -> Tuple[
 
 # Maybe use a better name for this function.
 # Last type hint is wrong since jax.scan's type hint is wrong due to no leading axis support in python.
-@partial(jit, static_argnames=['K', 'n_steps', 'save_steps'])
+@partial(jit, static_argnames=['step', 'double', 'K', 'n_steps', 'save_steps'])
 def doublings(x: Array, step: NCAStep, double: Lambda, K: int, n_steps: int, save_steps: bool) -> Tuple[Array, Union[Array, None]]:
     def step_fn(z, _) -> Tuple[Array, Union[Array, None]]:
         z = double(z)
