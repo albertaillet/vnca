@@ -180,7 +180,7 @@ class DoublingVNCA(Module):
     K: int
     N_nca_steps: int
 
-    def __init__(self, key: PRNGKeyArray, K: int = 4, N_nca_steps: int = 9) -> None:
+    def __init__(self, key: PRNGKeyArray, K: int = 5, N_nca_steps: int = 9) -> None:
         key1, key2 = split(key)
         self.encoder = Encoder(key=key1)
         self.step = NCAStep(key=key2)
@@ -198,7 +198,13 @@ class DoublingVNCA(Module):
         z = rearrange(z, 'c -> c 1 1')
 
         # run the doubling and NCA steps
-        z, _ = doublings(z, self.step, self.double, self.K, self.N_nca_steps, False)
+
+        for _ in range(self.K):
+            z = self.double(z)
+            for _ in range(self.N_nca_steps):
+                z = z + self.step(z)
+
+        # z, _ = doublings(z, self.step, self.double, self.K, self.N_nca_steps, False)
         return z, mean, logvar
 
 
