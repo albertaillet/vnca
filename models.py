@@ -166,7 +166,7 @@ def nca_steps(x: Array, step: NCAStep, n_steps: int, save_steps: bool) -> Tuple[
 def doublings(x: Array, step: NCAStep, double: Lambda, K: int, n_steps: int, save_steps: bool) -> Tuple[Array, Union[Array, None]]:
     def step_fn(z, _) -> Tuple[Array, Union[Array, None]]:
         z = double(z)
-        z, save = nca_steps(step, z, n_steps, save_steps)
+        z, save = nca_steps(z, step, n_steps, save_steps)
         return z, save if save_steps else None
 
     return lax.scan(step_fn, x, None, K)
