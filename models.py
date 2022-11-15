@@ -201,8 +201,9 @@ class DoublingVNCA(Module):
 
         for _ in range(self.K):
             z = self.double(z)
-            for _ in range(self.N_nca_steps):
-                z = z + self.step(z)
+            z, _ = nca_steps(z, self.step, self.N_nca_steps, False)
+        #     for _ in range(self.N_nca_steps):
+        #         z = z + self.step(z)
 
         # z, _ = doublings(z, self.step, self.double, self.K, self.N_nca_steps, False)
         return z, mean, logvar
