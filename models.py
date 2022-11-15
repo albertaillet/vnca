@@ -1,6 +1,10 @@
 import jax.numpy as np
 from jax.random import split, normal
+from jax import lax, jit
 from jax.nn import elu
+
+from functools import partial
+
 from einops import rearrange, repeat
 
 from equinox import Module
@@ -9,7 +13,7 @@ from equinox.nn import Sequential, Conv2d, ConvTranspose2d, Linear, Lambda
 
 # typing
 from jax import Array
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Union
 from jax.random import PRNGKeyArray
 
 
@@ -111,6 +115,8 @@ class NCAStep(Sequential):
             ]
         )
 
+    # We might want to add function to take multiple steps here
+
 
 class BaselineVAE(Module):
     encoder: Encoder
@@ -145,6 +151,27 @@ class BaselineVAE(Module):
         return self.decoder(c)
 
 
+@partial(jit, static_argnames=['n_steps', 'save_steps'])
+def nca_steps(x: Array, step: NCAStep, n_steps: int, save_steps: bool) -> Tuple[Array, Union[Array, None]]:
+    def step_fn(z, _) -> Tuple[Array, Union[Array, None]]:
+        z = z + step(z)
+        return z, z if save_steps else None
+
+    return lax.scan(step_fn, x, None, n_steps)
+
+
+# Maybe use a better name for this function.
+# Last type hint is wrong since jax.scan's type hint is wrong due to no leading axis support in python.
+@partial(jit, static_argnames=['K', 'n_steps', 'save_steps'])
+def doublings(x: Array, step: NCAStep, double: Lambda, K: int, n_steps: int, save_steps: bool) -> Tuple[Array, Union[Array, None]]:
+    def step_fn(z, _) -> Tuple[Array, Union[Array, None]]:
+        z = double(z)
+        z, save = nca_steps(step, z, n_steps, save_steps)
+        return z, save if save_steps else None
+
+    return lax.scan(step_fn, x, None, K)
+
+
 class DoublingVNCA(Module):
     encoder: Encoder
     step: NCAStep
@@ -170,12 +197,7 @@ class DoublingVNCA(Module):
         z = rearrange(z, 'c -> c 1 1')
 
         # run the doubling and NCA steps
-        z = self.double(z)
-        for _ in range(self.K):
-            for _ in range(self.N_nca_steps):
-                z = z + self.step(z)
-            z = self.double(z)
-
+        z = doublings(z, self.step, self.double, self.K, self.N_nca_steps, False)
         return z, mean, logvar
 
 
@@ -200,7 +222,6 @@ class NonDoublingVNCA(Module):
         z = repeat(z_0, 'c -> c h w', h=28, w=28)
 
         # run the NCA steps
-        for _ in range(self.N_nca_steps):
-            z = z + self.step(z)
+        z = nca_steps(z, self.step, self.N_nca_steps, False)
 
         return z, mean, logvar
