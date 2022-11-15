@@ -13,7 +13,7 @@ from equinox.nn import Sequential, Conv2d, ConvTranspose2d, Linear, Lambda
 
 # typing
 from jax import Array
-from typing import Optional, Tuple, Union
+from typing import Optional, Tuple, Union, List
 from jax.random import PRNGKeyArray
 
 
@@ -163,13 +163,14 @@ def nca_steps(x: Array, step: NCAStep, n_steps: int, save_steps: bool) -> Tuple[
 # Maybe use a better name for this function.
 # Last type hint is wrong since jax.scan's type hint is wrong due to no leading axis support in python.
 # @partial(jit, static_argnames=['step', 'double', 'K', 'n_steps', 'save_steps'])
-def doublings(x: Array, step: NCAStep, double: Lambda, K: int, n_steps: int, save_steps: bool) -> Tuple[Array, Union[Array, None]]:
-    def step_fn(z, _) -> Tuple[Array, Union[Array, None]]:
-        z = double(z)
-        z, save = nca_steps(z, step, n_steps, save_steps)
-        return z, save if save_steps else None
-
-    return lax.scan(step_fn, x, None, K)
+def doublings(x: Array, step: NCAStep, double: Lambda, K: int, n_steps: int, save_steps: bool) -> Tuple[Array, List[Union[Array, None]]]:
+    saved = []
+    for _ in range(K):
+        x = double(x)
+        x, save = nca_steps(x, step, n_steps, save_steps)
+        if save_steps:
+            saved.append(save)
+    return x, saved
 
 
 class DoublingVNCA(Module):
@@ -197,7 +198,7 @@ class DoublingVNCA(Module):
         z = rearrange(z, 'c -> c 1 1')
 
         # run the doubling and NCA steps
-        z = doublings(z, self.step, self.double, self.K, self.N_nca_steps, False)
+        z, _ = doublings(z, self.step, self.double, self.K, self.N_nca_steps, False)
         return z, mean, logvar
 
 
@@ -222,6 +223,6 @@ class NonDoublingVNCA(Module):
         z = repeat(z_0, 'c -> c h w', h=28, w=28)
 
         # run the NCA steps
-        z = nca_steps(z, self.step, self.N_nca_steps, False)
+        z, _ = nca_steps(z, self.step, self.N_nca_steps, False)
 
         return z, mean, logvar
