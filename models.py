@@ -1,9 +1,7 @@
 import jax.numpy as np
 from jax.random import split, normal
-from jax import lax, jit
+from jax import lax
 from jax.nn import elu
-
-from functools import partial
 
 from einops import rearrange, repeat
 
@@ -101,6 +99,13 @@ class Residual(Module):
         return x + res
 
 
+class Conv2dZeroInit(Conv2d):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.weight = np.zeros_like(self.weight)
+        self.bias = np.zeros_like(self.bias)
+
+
 class NCAStep(Sequential):
     def __init__(self, key: PRNGKeyArray) -> None:
         keys = split(key, 6)
@@ -111,11 +116,9 @@ class NCAStep(Sequential):
                 Residual(key=keys[2]),
                 Residual(key=keys[3]),
                 Residual(key=keys[4]),
-                Conv2d(128, 128, kernel_size=(1, 1), stride=(1, 1), key=keys[5]),
+                Conv2dZeroInit(128, 128, kernel_size=(1, 1), stride=(1, 1), key=keys[5]),
             ]
         )
-
-    # We might want to add function to take multiple steps here
 
 
 class BaselineVAE(Module):
