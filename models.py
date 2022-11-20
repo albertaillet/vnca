@@ -15,7 +15,7 @@ from typing import Optional, Tuple, Union, List
 from jax.random import PRNGKeyArray
 
 
-def sample(key: PRNGKeyArray, mu: Array, logvar: Array) -> Array:
+def sample(mu: Array, logvar: Array, *, key: PRNGKeyArray) -> Array:
     std: Array = np.exp(0.5 * logvar)
     # use the reparameterization trick
     return mu + std * normal(key, mu.shape)
@@ -39,7 +39,7 @@ Elu: Lambda = Lambda(elu)
 
 
 class Encoder(Sequential):
-    def __init__(self, key: PRNGKeyArray):
+    def __init__(self, *, key: PRNGKeyArray):
         keys = split(key, 6)
         super().__init__(
             [
@@ -60,12 +60,12 @@ class Encoder(Sequential):
 
 
 class LinearDecoder(Linear):
-    def __init__(self, key: PRNGKeyArray):
+    def __init__(self, *, key: PRNGKeyArray):
         super().__init__(in_features=128, out_features=2048, key=key)
 
 
 class BaselineDecoder(Sequential):
-    def __init__(self, key: PRNGKeyArray):
+    def __init__(self, *, key: PRNGKeyArray):
         keys = split(key, 5)
         super().__init__(
             [
@@ -86,12 +86,12 @@ class Residual(Module):
     conv1: Conv2d
     conv2: Conv2d
 
-    def __init__(self, key: PRNGKeyArray) -> None:
+    def __init__(self, *, key: PRNGKeyArray) -> None:
         key1, key2 = split(key, 2)
         self.conv1 = Conv2d(128, 128, kernel_size=(1, 1), stride=(1, 1), key=key1)
         self.conv2 = Conv2d(128, 128, kernel_size=(1, 1), stride=(1, 1), key=key2)
 
-    def __call__(self, x: Array, key: Optional[PRNGKeyArray] = None) -> Array:
+    def __call__(self, x: Array, *, key: Optional[PRNGKeyArray] = None) -> Array:
         res = x
         x = self.conv1(x)
         x = elu(x)
@@ -107,7 +107,7 @@ class Conv2dZeroInit(Conv2d):
 
 
 class NCAStep(Sequential):
-    def __init__(self, key: PRNGKeyArray) -> None:
+    def __init__(self, *, key: PRNGKeyArray) -> None:
         keys = split(key, 6)
         super().__init__(
             [
@@ -126,19 +126,19 @@ class BaselineVAE(Module):
     linear_decoder: LinearDecoder
     decoder: BaselineDecoder
 
-    def __init__(self, key: PRNGKeyArray) -> None:
+    def __init__(self, *, key: PRNGKeyArray) -> None:
         key1, key2, key3 = split(key, 3)
         self.encoder = Encoder(key=key1)
         self.linear_decoder = LinearDecoder(key=key2)
         self.decoder = BaselineDecoder(key=key3)
 
-    def __call__(self, x: Array, key: PRNGKeyArray) -> Tuple[Array, Array, Array]:
+    def __call__(self, x: Array, *, key: PRNGKeyArray) -> Tuple[Array, Array, Array]:
         # get parameters for the latent distribution
         z_params = self.encoder(x)
 
         # sample from the latent distribution
         mean, logvar = rearrange(z_params, '(c p) -> p c', c=128, p=2)
-        z = sample(key, mean, logvar)
+        z = sample(mean, logvar, key=key)
 
         # decode the latent sample
         z = self.linear_decoder(z)
@@ -183,7 +183,7 @@ class DoublingVNCA(Module):
     K: int
     N_nca_steps: int
 
-    def __init__(self, key: PRNGKeyArray, K: int = 5, N_nca_steps: int = 9) -> None:
+    def __init__(self, K: int = 5, N_nca_steps: int = 9, *, key: PRNGKeyArray) -> None:
         key1, key2 = split(key)
         self.encoder = Encoder(key=key1)
         self.step = NCAStep(key=key2)
@@ -191,7 +191,7 @@ class DoublingVNCA(Module):
         self.K = K
         self.N_nca_steps = N_nca_steps
 
-    def __call__(self, x: Array, key: PRNGKeyArray) -> Tuple[Array, Array, Array]:
+    def __call__(self, x: Array, *, key: PRNGKeyArray) -> Tuple[Array, Array, Array]:
         # get parameters for the latent distribution
         z_params = self.encoder(x)
 
@@ -216,13 +216,13 @@ class NonDoublingVNCA(Module):
     step: NCAStep
     N_nca_steps: int
 
-    def __init__(self, key: PRNGKeyArray, N_nca_steps: int = 9) -> None:
+    def __init__(self, N_nca_steps: int = 9, *, key: PRNGKeyArray) -> None:
         key1, key2 = split(key)
         self.encoder = Encoder(key=key1)
         self.step = NCAStep(key=key2)
         self.N_nca_steps = N_nca_steps
 
-    def __call__(self, x: Array, key: PRNGKeyArray) -> Tuple[Array, Array, Array]:
+    def __call__(self, x: Array, *, key: PRNGKeyArray) -> Tuple[Array, Array, Array]:
         # get parameters for the latent distribution
         z_params = self.encoder(x)
 
