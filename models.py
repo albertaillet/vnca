@@ -1,6 +1,8 @@
 import jax.numpy as np
 from jax.random import split, normal
+from jax import lax
 from jax.nn import elu
+
 from einops import rearrange, repeat
 
 from equinox import Module
@@ -9,7 +11,7 @@ from equinox.nn import Sequential, Conv2d, ConvTranspose2d, Linear, Lambda
 
 # typing
 from jax import Array
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Union, List
 from jax.random import PRNGKeyArray
 
 
@@ -97,6 +99,13 @@ class Residual(Module):
         return x + res
 
 
+class Conv2dZeroInit(Conv2d):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.weight = np.zeros_like(self.weight)
+        self.bias = np.zeros_like(self.bias)
+
+
 class NCAStep(Sequential):
     def __init__(self, key: PRNGKeyArray) -> None:
         keys = split(key, 6)
@@ -107,7 +116,7 @@ class NCAStep(Sequential):
                 Residual(key=keys[2]),
                 Residual(key=keys[3]),
                 Residual(key=keys[4]),
-                Conv2d(128, 128, kernel_size=(1, 1), stride=(1, 1), key=keys[5]),
+                Conv2dZeroInit(128, 128, kernel_size=(1, 1), stride=(1, 1), key=keys[5]),
             ]
         )
 
@@ -145,6 +154,28 @@ class BaselineVAE(Module):
         return self.decoder(c)
 
 
+# @partial(jit, static_argnames=['step', 'n_steps', 'save_steps'])
+def nca_steps(x: Array, step: NCAStep, n_steps: int, save_steps: bool) -> Tuple[Array, Union[Array, None]]:
+    def step_fn(z, _) -> Tuple[Array, Union[Array, None]]:
+        z = z + step(z)
+        return z, z if save_steps else None
+
+    return lax.scan(step_fn, x, None, n_steps)
+
+
+# Maybe use a better name for this function.
+# Last type hint is wrong since jax.scan's type hint is wrong due to no leading axis support in python.
+# @partial(jit, static_argnames=['step', 'double', 'K', 'n_steps', 'save_steps'])
+def doublings(x: Array, step: NCAStep, double: Lambda, K: int, n_steps: int, save_steps: bool) -> Tuple[Array, List[Union[Array, None]]]:
+    saved = []
+    for _ in range(K):
+        x = double(x)
+        x, save = nca_steps(x, step, n_steps, save_steps)
+        if save_steps:
+            saved.append(save)
+    return x, saved
+
+
 class DoublingVNCA(Module):
     encoder: Encoder
     step: NCAStep
@@ -152,7 +183,7 @@ class DoublingVNCA(Module):
     K: int
     N_nca_steps: int
 
-    def __init__(self, key: PRNGKeyArray, K: int = 4, N_nca_steps: int = 9) -> None:
+    def __init__(self, key: PRNGKeyArray, K: int = 5, N_nca_steps: int = 9) -> None:
         key1, key2 = split(key)
         self.encoder = Encoder(key=key1)
         self.step = NCAStep(key=key2)
@@ -170,12 +201,13 @@ class DoublingVNCA(Module):
         z = rearrange(z, 'c -> c 1 1')
 
         # run the doubling and NCA steps
-        z = self.double(z)
+
         for _ in range(self.K):
+            z = self.double(z)
             for _ in range(self.N_nca_steps):
                 z = z + self.step(z)
-            z = self.double(z)
 
+        # z, _ = doublings(z, self.step, self.double, self.K, self.N_nca_steps, False)
         return z, mean, logvar
 
 
@@ -200,7 +232,6 @@ class NonDoublingVNCA(Module):
         z = repeat(z_0, 'c -> c h w', h=28, w=28)
 
         # run the NCA steps
-        for _ in range(self.N_nca_steps):
-            z = z + self.step(z)
+        z, _ = nca_steps(z, self.step, self.N_nca_steps, False)
 
         return z, mean, logvar
