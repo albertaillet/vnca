@@ -1,6 +1,5 @@
 import jax.numpy as np
 from jax.random import split, normal
-from jax import lax
 from jax.nn import elu
 
 from einops import rearrange, repeat
@@ -8,10 +7,11 @@ from einops import rearrange, repeat
 from equinox import Module
 from equinox.nn import Sequential, Conv2d, ConvTranspose2d, Linear, Lambda
 
+from functools import partial
 
 # typing
 from jax import Array
-from typing import Optional, Tuple, Union, List
+from typing import Optional, Tuple
 from jax.random import PRNGKeyArray
 
 
@@ -55,6 +55,7 @@ class Encoder(Sequential):
                 Elu,
                 Flatten,
                 Linear(in_features=2048, out_features=2 * latent_size, key=keys[5]),
+                Lambda(partial(rearrange, pattern='(p l) -> p l', l=latent_size, p=2)),
             ]
         )
 
@@ -136,10 +137,9 @@ class BaselineVAE(Module):
 
     def __call__(self, x: Array, *, key: PRNGKeyArray) -> Tuple[Array, Array, Array]:
         # get parameters for the latent distribution
-        z_params = self.encoder(x)
+        mean, logvar = self.encoder(x)
 
         # sample from the latent distribution
-        mean, logvar = rearrange(z_params, '(p l) -> p l', l=self.latent_size, p=2)
         z = sample(mean, logvar, key=key)
 
         # decode the latent sample
@@ -154,28 +154,6 @@ class BaselineVAE(Module):
         c = self.linear_decoder(np.zeros(self.latent_size))
         c = rearrange(c, '(c h w) -> c h w', h=2, w=2, c=512)
         return self.decoder(c)
-
-
-# @partial(jit, static_argnames=['step', 'n_steps', 'save_steps'])
-def nca_steps(x: Array, step: NCAStep, n_steps: int, save_steps: bool) -> Tuple[Array, Union[Array, None]]:
-    def step_fn(z, _) -> Tuple[Array, Union[Array, None]]:
-        z = z + step(z)
-        return z, z if save_steps else None
-
-    return lax.scan(step_fn, x, None, n_steps)
-
-
-# Maybe use a better name for this function.
-# Last type hint is wrong since jax.scan's type hint is wrong due to no leading axis support in python.
-# @partial(jit, static_argnames=['step', 'double', 'K', 'n_steps', 'save_steps'])
-def doublings(x: Array, step: NCAStep, double: Lambda, K: int, n_steps: int, save_steps: bool) -> Tuple[Array, List[Union[Array, None]]]:
-    saved = []
-    for _ in range(K):
-        x = double(x)
-        x, save = nca_steps(x, step, n_steps, save_steps)
-        if save_steps:
-            saved.append(save)
-    return x, saved
 
 
 class DoublingVNCA(Module):
@@ -197,10 +175,9 @@ class DoublingVNCA(Module):
 
     def __call__(self, x: Array, *, key: PRNGKeyArray) -> Tuple[Array, Array, Array]:
         # get parameters for the latent distribution
-        z_params = self.encoder(x)
+        mean, logvar = self.encoder(x)
 
         # sample from the latent distribution
-        mean, logvar = rearrange(z_params, '(p l) -> p l', l=self.latent_size, p=2)
         z = sample(mean, logvar, key=key)
         z = rearrange(z, 'c -> c 1 1')
 
@@ -230,14 +207,14 @@ class NonDoublingVNCA(Module):
 
     def __call__(self, x: Array, *, key: PRNGKeyArray) -> Tuple[Array, Array, Array]:
         # get parameters for the latent distribution
-        z_params = self.encoder(x)
+        mean, logvar = self.encoder(x)
 
         # sample from the latent distribution
-        mean, logvar = rearrange(z_params, '(p l) -> p l', l=self.latent_size, p=2)
         z_0 = sample(mean, logvar, key=key)
         z = repeat(z_0, 'c -> c h w', h=28, w=28)
 
         # run the NCA steps
-        z, _ = nca_steps(z, self.step, self.N_nca_steps, False)
+        for _ in range(self.N_nca_steps):
+            z = z + self.step(z)
 
         return z, mean, logvar
