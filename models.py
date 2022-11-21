@@ -39,7 +39,7 @@ Elu: Lambda = Lambda(elu)
 
 
 class Encoder(Sequential):
-    def __init__(self, *, key: PRNGKeyArray):
+    def __init__(self, latent_size: int, *, key: PRNGKeyArray):
         keys = split(key, 6)
         super().__init__(
             [
@@ -54,14 +54,14 @@ class Encoder(Sequential):
                 Conv2d(256, 512, kernel_size=(5, 5), stride=(2, 2), padding=(2, 2), key=keys[4]),
                 Elu,
                 Flatten,
-                Linear(in_features=2048, out_features=256, key=keys[5]),
+                Linear(in_features=2048, out_features=2 * latent_size, key=keys[5]),
             ]
         )
 
 
 class LinearDecoder(Linear):
-    def __init__(self, *, key: PRNGKeyArray):
-        super().__init__(in_features=128, out_features=2048, key=key)
+    def __init__(self, latent_size: int, *, key: PRNGKeyArray):
+        super().__init__(in_features=latent_size, out_features=2048, key=key)
 
 
 class BaselineDecoder(Sequential):
@@ -86,10 +86,10 @@ class Residual(Module):
     conv1: Conv2d
     conv2: Conv2d
 
-    def __init__(self, *, key: PRNGKeyArray) -> None:
+    def __init__(self, latent_size: int, *, key: PRNGKeyArray) -> None:
         key1, key2 = split(key, 2)
-        self.conv1 = Conv2d(128, 128, kernel_size=(1, 1), stride=(1, 1), key=key1)
-        self.conv2 = Conv2d(128, 128, kernel_size=(1, 1), stride=(1, 1), key=key2)
+        self.conv1 = Conv2d(latent_size, latent_size, kernel_size=(1, 1), stride=(1, 1), key=key1)
+        self.conv2 = Conv2d(latent_size, latent_size, kernel_size=(1, 1), stride=(1, 1), key=key2)
 
     def __call__(self, x: Array, *, key: Optional[PRNGKeyArray] = None) -> Array:
         res = x
@@ -107,16 +107,16 @@ class Conv2dZeroInit(Conv2d):
 
 
 class NCAStep(Sequential):
-    def __init__(self, *, key: PRNGKeyArray) -> None:
+    def __init__(self, latent_size: int, *, key: PRNGKeyArray) -> None:
         keys = split(key, 6)
         super().__init__(
             [
-                Conv2d(128, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), key=keys[0]),
-                Residual(key=keys[1]),
-                Residual(key=keys[2]),
-                Residual(key=keys[3]),
-                Residual(key=keys[4]),
-                Conv2dZeroInit(128, 128, kernel_size=(1, 1), stride=(1, 1), key=keys[5]),
+                Conv2d(latent_size, latent_size, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), key=keys[0]),
+                Residual(latent_size=latent_size, key=keys[1]),
+                Residual(latent_size=latent_size, key=keys[2]),
+                Residual(latent_size=latent_size, key=keys[3]),
+                Residual(latent_size=latent_size, key=keys[4]),
+                Conv2dZeroInit(latent_size, latent_size, kernel_size=(1, 1), stride=(1, 1), key=keys[5]),
             ]
         )
 
@@ -125,11 +125,13 @@ class BaselineVAE(Module):
     encoder: Encoder
     linear_decoder: LinearDecoder
     decoder: BaselineDecoder
+    latent_size: int
 
-    def __init__(self, *, key: PRNGKeyArray) -> None:
+    def __init__(self, latent_size: int = 256, *, key: PRNGKeyArray) -> None:
         key1, key2, key3 = split(key, 3)
-        self.encoder = Encoder(key=key1)
-        self.linear_decoder = LinearDecoder(key=key2)
+        self.latent_size = latent_size
+        self.encoder = Encoder(latent_size=latent_size, key=key1)
+        self.linear_decoder = LinearDecoder(latent_size=latent_size, key=key2)
         self.decoder = BaselineDecoder(key=key3)
 
     def __call__(self, x: Array, *, key: PRNGKeyArray) -> Tuple[Array, Array, Array]:
@@ -137,7 +139,7 @@ class BaselineVAE(Module):
         z_params = self.encoder(x)
 
         # sample from the latent distribution
-        mean, logvar = rearrange(z_params, '(c p) -> p c', c=128, p=2)
+        mean, logvar = rearrange(z_params, '(l p) -> p l', l=self.latent_size, p=2)
         z = sample(mean, logvar, key=key)
 
         # decode the latent sample
@@ -149,7 +151,7 @@ class BaselineVAE(Module):
         return recon_x, mean, logvar
 
     def center(self) -> Array:
-        c = self.linear_decoder(np.zeros(128))
+        c = self.linear_decoder(np.zeros(self.latent_size))
         c = rearrange(c, '(c h w) -> c h w', h=2, w=2, c=512)
         return self.decoder(c)
 
@@ -180,14 +182,16 @@ class DoublingVNCA(Module):
     encoder: Encoder
     step: NCAStep
     double: Lambda
+    latent_size: int
     K: int
     N_nca_steps: int
 
-    def __init__(self, K: int = 5, N_nca_steps: int = 9, *, key: PRNGKeyArray) -> None:
+    def __init__(self, latent_size: int = 256, K: int = 5, N_nca_steps: int = 9, *, key: PRNGKeyArray) -> None:
         key1, key2 = split(key)
-        self.encoder = Encoder(key=key1)
-        self.step = NCAStep(key=key2)
+        self.encoder = Encoder(latent_size=latent_size, key=key1)
+        self.step = NCAStep(latent_size=latent_size, key=key2)
         self.double = Double
+        self.latent_size = latent_size
         self.K = K
         self.N_nca_steps = N_nca_steps
 
@@ -196,8 +200,8 @@ class DoublingVNCA(Module):
         z_params = self.encoder(x)
 
         # sample from the latent distribution
-        mean, logvar = rearrange(z_params, '(c p) -> p c', c=128, p=2)
-        z = sample(key, mean, logvar)
+        mean, logvar = rearrange(z_params, '(l p) -> p l', l=self.latent_size, p=2)
+        z = sample(mean, logvar, key=key)
         z = rearrange(z, 'c -> c 1 1')
 
         # run the doubling and NCA steps
@@ -214,12 +218,14 @@ class DoublingVNCA(Module):
 class NonDoublingVNCA(Module):
     encoder: Encoder
     step: NCAStep
+    latent_size: int
     N_nca_steps: int
 
-    def __init__(self, N_nca_steps: int = 9, *, key: PRNGKeyArray) -> None:
+    def __init__(self, latent_size: int = 256, N_nca_steps: int = 9, *, key: PRNGKeyArray) -> None:
         key1, key2 = split(key)
-        self.encoder = Encoder(key=key1)
-        self.step = NCAStep(key=key2)
+        self.encoder = Encoder(latent_size=latent_size, key=key1)
+        self.step = NCAStep(latent_size=latent_size, key=key2)
+        self.latent_size = latent_size
         self.N_nca_steps = N_nca_steps
 
     def __call__(self, x: Array, *, key: PRNGKeyArray) -> Tuple[Array, Array, Array]:
@@ -227,8 +233,8 @@ class NonDoublingVNCA(Module):
         z_params = self.encoder(x)
 
         # sample from the latent distribution
-        mean, logvar = rearrange(z_params, '(c p) -> p c', c=128, p=2)
-        z_0 = sample(key, mean, logvar)
+        mean, logvar = rearrange(z_params, '(l p) -> p l', l=self.latent_size, p=2)
+        z_0 = sample(mean, logvar, key=key)
         z = repeat(z_0, 'c -> c h w', h=28, w=28)
 
         # run the NCA steps
