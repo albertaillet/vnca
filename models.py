@@ -8,6 +8,7 @@ from einops import rearrange, repeat
 from equinox import Module
 from equinox.nn import Sequential, Conv2d, ConvTranspose2d, Linear, Lambda
 
+from functools import partial
 
 # typing
 from jax import Array
@@ -55,6 +56,7 @@ class Encoder(Sequential):
                 Elu,
                 Flatten,
                 Linear(in_features=2048, out_features=2 * latent_size, key=keys[5]),
+                Lambda(partial(rearrange, pattern='(p l) -> p l', l=latent_size, p=2)),
             ]
         )
 
@@ -136,10 +138,9 @@ class BaselineVAE(Module):
 
     def __call__(self, x: Array, *, key: PRNGKeyArray) -> Tuple[Array, Array, Array]:
         # get parameters for the latent distribution
-        z_params = self.encoder(x)
+        mean, logvar = self.encoder(x)
 
         # sample from the latent distribution
-        mean, logvar = rearrange(z_params, '(p l) -> p l', l=self.latent_size, p=2)
         z = sample(mean, logvar, key=key)
 
         # decode the latent sample
@@ -197,10 +198,9 @@ class DoublingVNCA(Module):
 
     def __call__(self, x: Array, *, key: PRNGKeyArray) -> Tuple[Array, Array, Array]:
         # get parameters for the latent distribution
-        z_params = self.encoder(x)
+        mean, logvar = self.encoder(x)
 
         # sample from the latent distribution
-        mean, logvar = rearrange(z_params, '(p l) -> p l', l=self.latent_size, p=2)
         z = sample(mean, logvar, key=key)
         z = rearrange(z, 'c -> c 1 1')
 
@@ -230,10 +230,9 @@ class NonDoublingVNCA(Module):
 
     def __call__(self, x: Array, *, key: PRNGKeyArray) -> Tuple[Array, Array, Array]:
         # get parameters for the latent distribution
-        z_params = self.encoder(x)
+        mean, logvar = self.encoder(x)
 
         # sample from the latent distribution
-        mean, logvar = rearrange(z_params, '(p l) -> p l', l=self.latent_size, p=2)
         z_0 = sample(mean, logvar, key=key)
         z = repeat(z_0, 'c -> c h w', h=28, w=28)
 
