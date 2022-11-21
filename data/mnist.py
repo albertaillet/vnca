@@ -59,7 +59,7 @@ def get_indices(n: int, batch_size: int, key: PRNGKeyArray) -> Array:
 
 def load_mnist(batch_size: int, key: PRNGKeyArray) -> Tuple[Iterator, Iterator]:
     '''Load binarized MNIST dataset.'''
-    mnist_data = get_mnist()
+    mnist_data = get_mnist(split=['train', 'test'])
     train_dataset, test_dataset = mnist_data['train'], mnist_data['test']
 
     def dataset_iterator(dataset: Array, batch_size: int, key: PRNGKeyArray) -> Iterator:
@@ -76,7 +76,7 @@ def load_mnist_train_on_tpu(devices: list) -> Array:
     '''Load binarized MNIST dataset to TPU.'''
     from jax import device_put_replicated
 
-    mnist_data = get_mnist(splits=['train'])
+    mnist_data = get_mnist(split=['train'])
     train_dataset = mnist_data['train']
 
     return device_put_replicated(train_dataset, devices)
