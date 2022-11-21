@@ -2,13 +2,12 @@ import jax.numpy as np
 from jax import Array
 from jax.random import split, PRNGKeyArray, permutation, PRNGKey
 from einops import rearrange
-from torchvision.datasets import MNIST
-
-
-ROOT = './data'
+import tensorflow_datasets as tfds
 
 # typing
 from typing import Iterator, Tuple
+
+ROOT = './data/raw/'
 
 
 def get_indices(n: int, batch_size: int, key: PRNGKeyArray) -> Array:
@@ -20,15 +19,16 @@ def get_indices(n: int, batch_size: int, key: PRNGKeyArray) -> Array:
 
 
 def load_mnist(batch_size: int, key: PRNGKeyArray) -> Tuple[Iterator, Iterator]:
-    '''Load MNIST dataset.'''
-    train_dataset = MNIST(root=ROOT, train=True, download=True, transform=None)
-    test_dataset = MNIST(root=ROOT, train=False, download=True, transform=None)
+    '''Load binarized MNIST dataset.'''
+    mnist_data = tfds.load(name='binarized_mnist', batch_size=-1, data_dir=ROOT)
+    mnist_data = tfds.as_numpy(mnist_data)
+    train_dataset, test_dataset = mnist_data['train']['image'], mnist_data['test']['image']
 
     train_dataset = np.float32(train_dataset) / 255.0  # rescale to [0, 1]
     test_dataset = np.float32(test_dataset) / 255.0
 
-    train_dataset = rearrange(train_dataset, 'n h w -> n 1 h w')  # add channel dimension
-    test_dataset = rearrange(test_dataset, 'n h w -> n 1 h w')
+    train_dataset = rearrange(train_dataset, 'n h w c -> n c h w')  # move channel dimension
+    test_dataset = rearrange(test_dataset, 'n h w c -> n c h w')
 
     def dataset_iterator(dataset: Array, batch_size: int, key: PRNGKeyArray) -> Iterator:
         n = len(dataset)
@@ -41,14 +41,16 @@ def load_mnist(batch_size: int, key: PRNGKeyArray) -> Tuple[Iterator, Iterator]:
 
 
 def load_mnist_train_on_tpu(devices: list) -> Array:
-    '''Load MNIST dataset to TPU.'''
+    '''Load binarized MNIST dataset to TPU.'''
     from jax import device_put_replicated
 
-    train_dataset = MNIST(root=ROOT, train=True, download=True, transform=None)
+    mnist_data = tfds.load(name='binarized_mnist', split='train', batch_size=-1, data_dir=ROOT)
+    mnist_data = tfds.as_numpy(mnist_data)
+    train_dataset = mnist_data['image']
 
-    train_dataset = np.float32(train_dataset.data) / 255.0  # rescale to [0, 1]
+    train_dataset = np.float32(train_dataset) / 255.0  # rescale to [0, 1]
 
-    train_dataset = rearrange(train_dataset, 'n h w -> n 1 h w')  # add channel dimension
+    train_dataset = rearrange(train_dataset, 'n h w c -> n c h w')  # move channel dimension
 
     return device_put_replicated(train_dataset, devices)
 
