@@ -27,7 +27,7 @@ def download_mnist(dir: Path) -> None:
                 f.write(r.read())
 
         npz_path = dir / s
-        split_data = genfromtxt(amat_path, delimiter=' ', dtype=bool8)
+        split_data = genfromtxt(amat_path, delimiter=' ')
         split_data = rearrange(split_data, 'n (h w c) -> n c h w', h=28, w=28, c=1)
         save(npz_path, split_data)
 
