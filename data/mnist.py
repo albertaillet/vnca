@@ -1,13 +1,52 @@
 import jax.numpy as np
-from jax import Array
 from jax.random import split, PRNGKeyArray, permutation, PRNGKey
 from einops import rearrange
-import tensorflow_datasets as tfds
+from pathlib import Path
+from urllib.request import urlopen
+from numpy import genfromtxt, save, load, bool8
 
 # typing
-from typing import Iterator, Tuple
+from jax import Array
+from typing import Iterator, Tuple, List, Dict
 
-ROOT = './data/raw/'
+ROOT = Path('./data/raw/binarized_mnist')
+URL = 'http://www.cs.toronto.edu/~larocheh/public/datasets/binarized_mnist/'
+SPLITS = {'train': 'binarized_mnist_train.amat', 'val': 'binarized_mnist_valid.amat', 'test': 'binarized_mnist_test.amat'}
+
+
+def download_mnist(dir: Path) -> None:
+    '''Download binarized MNIST dataset to directory.'''
+
+    dir.mkdir(parents=True)
+    for s, file in SPLITS.items():
+        amat_path = dir / file
+        print(f'Downloading {s}...', end='\r')
+
+        with urlopen(URL + file) as r:
+            with open(amat_path, 'wb') as f:
+                f.write(r.read())
+
+        npz_path = dir / s
+        split_data = genfromtxt(amat_path, delimiter=' ', dtype=bool8)
+        split_data = rearrange(split_data, 'n (h w c) -> n c h w', h=28, w=28, c=1)
+        save(npz_path, split_data)
+
+        print(f'Downloaded {s} to {npz_path}')
+
+
+def get_mnist(split: List[str] = ['train', 'val', 'test']) -> Dict[str, Array]:
+    '''Get binarized MNIST dataset.'''
+
+    if not ROOT.exists():
+        download_mnist(ROOT)
+
+    data = {}
+    for s in split:
+        assert s in SPLITS.keys(), f'Invalid split: {s}'
+        npz_path = ROOT / f'{s}.npy'
+        split_data = load(npz_path)
+        data[s] = np.array(split_data, dtype=np.float32)
+    return data
 
 
 def get_indices(n: int, batch_size: int, key: PRNGKeyArray) -> Array:
@@ -20,15 +59,8 @@ def get_indices(n: int, batch_size: int, key: PRNGKeyArray) -> Array:
 
 def load_mnist(batch_size: int, key: PRNGKeyArray) -> Tuple[Iterator, Iterator]:
     '''Load binarized MNIST dataset.'''
-    mnist_data = tfds.load(name='binarized_mnist', batch_size=-1, data_dir=ROOT)
-    mnist_data = tfds.as_numpy(mnist_data)
-    train_dataset, test_dataset = mnist_data['train']['image'], mnist_data['test']['image']
-
-    train_dataset = np.float32(train_dataset) / 255.0  # rescale to [0, 1]
-    test_dataset = np.float32(test_dataset) / 255.0
-
-    train_dataset = rearrange(train_dataset, 'n h w c -> n c h w')  # move channel dimension
-    test_dataset = rearrange(test_dataset, 'n h w c -> n c h w')
+    mnist_data = get_mnist()
+    train_dataset, test_dataset = mnist_data['train'], mnist_data['test']
 
     def dataset_iterator(dataset: Array, batch_size: int, key: PRNGKeyArray) -> Iterator:
         n = len(dataset)
@@ -44,13 +76,8 @@ def load_mnist_train_on_tpu(devices: list) -> Array:
     '''Load binarized MNIST dataset to TPU.'''
     from jax import device_put_replicated
 
-    mnist_data = tfds.load(name='binarized_mnist', split='train', batch_size=-1, data_dir=ROOT)
-    mnist_data = tfds.as_numpy(mnist_data)
-    train_dataset = mnist_data['image']
-
-    train_dataset = np.float32(train_dataset) / 255.0  # rescale to [0, 1]
-
-    train_dataset = rearrange(train_dataset, 'n h w c -> n c h w')  # move channel dimension
+    mnist_data = get_mnist(splits=['train'])
+    train_dataset = mnist_data['train']
 
     return device_put_replicated(train_dataset, devices)
 
