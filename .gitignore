@@ -1,3 +1,5 @@
 *.pyc
 wandb/
-data/MNIST/raw/
+data/raw/
+sandbox.*
+.DS_Store
