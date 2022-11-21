@@ -139,7 +139,7 @@ class BaselineVAE(Module):
         z_params = self.encoder(x)
 
         # sample from the latent distribution
-        mean, logvar = rearrange(z_params, '(l p) -> p l', l=self.latent_size, p=2)
+        mean, logvar = rearrange(z_params, '(p l) -> p l', l=self.latent_size, p=2)
         z = sample(mean, logvar, key=key)
 
         # decode the latent sample
@@ -200,7 +200,7 @@ class DoublingVNCA(Module):
         z_params = self.encoder(x)
 
         # sample from the latent distribution
-        mean, logvar = rearrange(z_params, '(l p) -> p l', l=self.latent_size, p=2)
+        mean, logvar = rearrange(z_params, '(p l) -> p l', l=self.latent_size, p=2)
         z = sample(mean, logvar, key=key)
         z = rearrange(z, 'c -> c 1 1')
 
@@ -233,7 +233,7 @@ class NonDoublingVNCA(Module):
         z_params = self.encoder(x)
 
         # sample from the latent distribution
-        mean, logvar = rearrange(z_params, '(l p) -> p l', l=self.latent_size, p=2)
+        mean, logvar = rearrange(z_params, '(p l) -> p l', l=self.latent_size, p=2)
         z_0 = sample(mean, logvar, key=key)
         z = repeat(z_0, 'c -> c h w', h=28, w=28)
 
