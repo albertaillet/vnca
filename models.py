@@ -1,6 +1,5 @@
 import jax.numpy as np
 from jax.random import split, normal
-from jax import lax
 from jax.nn import elu
 
 from einops import rearrange, repeat
@@ -12,7 +11,7 @@ from functools import partial
 
 # typing
 from jax import Array
-from typing import Optional, Tuple, Union, List
+from typing import Optional, Tuple
 from jax.random import PRNGKeyArray
 
 
@@ -157,28 +156,6 @@ class BaselineVAE(Module):
         return self.decoder(c)
 
 
-# @partial(jit, static_argnames=['step', 'n_steps', 'save_steps'])
-def nca_steps(x: Array, step: NCAStep, n_steps: int, save_steps: bool) -> Tuple[Array, Union[Array, None]]:
-    def step_fn(z, _) -> Tuple[Array, Union[Array, None]]:
-        z = z + step(z)
-        return z, z if save_steps else None
-
-    return lax.scan(step_fn, x, None, n_steps)
-
-
-# Maybe use a better name for this function.
-# Last type hint is wrong since jax.scan's type hint is wrong due to no leading axis support in python.
-# @partial(jit, static_argnames=['step', 'double', 'K', 'n_steps', 'save_steps'])
-def doublings(x: Array, step: NCAStep, double: Lambda, K: int, n_steps: int, save_steps: bool) -> Tuple[Array, List[Union[Array, None]]]:
-    saved = []
-    for _ in range(K):
-        x = double(x)
-        x, save = nca_steps(x, step, n_steps, save_steps)
-        if save_steps:
-            saved.append(save)
-    return x, saved
-
-
 class DoublingVNCA(Module):
     encoder: Encoder
     step: NCAStep
@@ -237,6 +214,7 @@ class NonDoublingVNCA(Module):
         z = repeat(z_0, 'c -> c h w', h=28, w=28)
 
         # run the NCA steps
-        z, _ = nca_steps(z, self.step, self.N_nca_steps, False)
+        for _ in range(self.N_nca_steps):
+            z = z + self.step(z)
 
         return z, mean, logvar
