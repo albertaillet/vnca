@@ -181,22 +181,23 @@ class DoublingVNCA(Module):
         # get parameters for the latent distribution
         mean, logvar = self.encoder(x)
 
-        # sample from the latent distribution
-
-        # repeat the sample M times
+        # sample from the latent distribution M times
         z = sample(mean, logvar, (M, *mean.shape), key=key)
 
         # Add hight and width dimensions
         z = rearrange(z, 'M c -> M c 1 1')
 
-        # run the doubling and NCA steps
-        # we vmap over the M samples
-        for _ in range(self.K):
-            z = vmap(self.double)(z)
-            for _ in range(self.N_nca_steps):
-                z = z + vmap(self.step)(z)
+        # vmap over the M samples
+        z = vmap(self.decoder)(z)
 
-        return z[:, 0], mean, logvar
+        return z[:, :1, 2:-2, 2:-2], mean, logvar
+
+    def decoder(self, z: Array) -> Array:
+        for _ in range(self.K):
+            z = self.double(z)
+            for _ in range(self.N_nca_steps):
+                z = z + self.step(z)
+        return z
 
 
 class NonDoublingVNCA(Module):
