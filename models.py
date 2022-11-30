@@ -190,13 +190,13 @@ class DoublingVNCA(Module):
         z = rearrange(z, 'M c -> M c 1 1')
 
         # run the doubling and NCA steps
-
+        # we vmap over the M samples
         for _ in range(self.K):
             z = vmap(self.double)(z)
             for _ in range(self.N_nca_steps):
                 z = z + vmap(self.step)(z)
 
-        return z, mean, logvar
+        return z[:, 0], mean, logvar
 
 
 class NonDoublingVNCA(Module):
