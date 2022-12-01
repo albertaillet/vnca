@@ -141,18 +141,19 @@ class BaselineVAE(Module):
         self.linear_decoder = LinearDecoder(latent_size=latent_size, key=key2)
         self.decoder = BaselineDecoder(key=key3)
 
-    def __call__(self, x: Array, *, key: PRNGKeyArray) -> Tuple[Array, Array, Array]:
+    def __call__(self, x: Array, *, key: PRNGKeyArray, M: int = 1) -> Tuple[Array, Array, Array]:
         # get parameters for the latent distribution
         mean, logvar = self.encoder(x)
 
-        # sample from the latent distribution
-        z = sample(mean, logvar, mean.shape, key=key)
+        # sample from the latent distribution M times
+        z = sample(mean, logvar, (M, *mean.shape), key=key)
 
         # decode the latent sample
-        z = self.linear_decoder(z)
+        z = vmap(self.linear_decoder)(z)
 
-        # reconstruct the image
-        recon_x = self.decoder(z)
+        # vmap over the M samples and reconstruct the image
+        recon_x = vmap(self.decoder)(z)
+
         return recon_x, mean, logvar
 
     def center(self) -> Array:
@@ -194,7 +195,6 @@ class DoublingVNCA(Module):
 
         # Add height and width dimensions
         z = rearrange(z, 'M c -> M c 1 1')
-        print(z.shape)
         # vmap over the M samples
         z = vmap(self.decoder)(z)
 
@@ -224,16 +224,17 @@ class NonDoublingVNCA(Module):
         self.latent_size = latent_size
         self.N_nca_steps = N_nca_steps
 
-    def __call__(self, x: Array, *, key: PRNGKeyArray) -> Tuple[Array, Array, Array]:
+    def __call__(self, x: Array, *, key: PRNGKeyArray, M: int = 1) -> Tuple[Array, Array, Array]:
         # get parameters for the latent distribution
         mean, logvar = self.encoder(x)
 
         # sample from the latent distribution
-        z_0 = sample(mean, logvar, mean.shape, key=key)
-        z = repeat(z_0, 'c -> c h w', h=28, w=28)
+        z = sample(mean, logvar, (M, *mean.shape), key=key)
+
+        z = repeat(z, 'M c -> M c h w', h=28, w=28)
 
         # run the NCA steps
         for _ in range(self.N_nca_steps):
-            z = z + self.step(z)
+            z = z + vmap(self.step)(z)
 
         return z, mean, logvar
