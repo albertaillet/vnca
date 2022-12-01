@@ -194,16 +194,15 @@ class DoublingVNCA(Module):
 
         # Add height and width dimensions
         z = rearrange(z, 'M c -> M c 1 1')
-
+        print(z.shape)
         # vmap over the M samples
-        z = self.decoder(z)
+        z = vmap(self.decoder)(z)
 
         # resize the image to the original size
-        z = vmap(crop, in_axes=(0, None))(z, x.shape)
+        # z = vmap(crop, in_axes=(0, None))(z, x.shape)
 
         return z, mean, logvar
 
-    @vmap
     def decoder(self, z: Array) -> Array:
         for _ in range(self.K):
             z = self.double(z)
