@@ -61,9 +61,6 @@ def test_double_shape(img, doubled_img):
     assert np.all(Double(img) == doubled_img)
 
 
->>>>>>> Stashed changes
-
-
 @fixture
 def img():
     return np.array(
