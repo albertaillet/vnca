@@ -22,7 +22,7 @@ def iwelbo_loss(model: Module, x: Array, key: PRNGKeyArray, M: int = 1) -> float
     recon_x, mean, logvar = filter_vmap(model)(x, key=keys, M=M)
 
     # Posterior p_{\theta}(z|x)
-    post = Normal(loc=np.zeros_like(mean), scale=np.ones_like(logvar))
+    post = Normal(np.zeros_like(mean), np.ones_like(logvar))
 
     # Approximate posterior q_{\phi}(z|x)
     latent = Normal(mean, np.exp(1 / 2 * logvar))
@@ -35,11 +35,13 @@ def iwelbo_loss(model: Module, x: Array, key: PRNGKeyArray, M: int = 1) -> float
 
     # Repeat samples first for broadcasting
     kl_div = repeat(kl_div, 'b -> b m', m=M)
-    xs = repeat(x, "b c h w -> b m c h w", m=M)
+    xs = repeat(x, 'b c h w -> b m c h w', m=M)
 
     # Log-likelihood or reconstruction loss
     like = reduce(likelihood.log_prob(xs), 'b m c h w -> b m', 'sum')
 
     # Importance weights
-    iw_loss = -np.mean(reduce(like - kl_div, "b m -> b", logsumexp) - np.log(M))
-    return iw_loss
+    iw_loss = reduce(like - kl_div, 'b m -> b', logsumexp) - np.log(M)
+
+    # Mean over the batch
+    return -np.mean(iw_loss)
