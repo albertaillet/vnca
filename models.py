@@ -35,6 +35,11 @@ def crop(x: Array, shape: Tuple[int, int, int]) -> Array:
     return x[:c, hh : h - hh, ww : w - ww]
 
 
+def pad(x: Array, p: int) -> Array:
+    '''Pad an image of shape (c, h, w) with zeros.'''
+    return np.pad(x, ((0, 0), (p, p), (p, p)), mode='constant', constant_values=0)
+
+
 def flatten(x: Array) -> Array:
     return rearrange(x, 'c h w -> (c h w)')
 
@@ -47,14 +52,6 @@ def double(x: Array) -> Array:
 
 
 Double: Lambda = Lambda(double)
-
-
-def pad(x: Array, p: int) -> Array:
-    '''Pad an image of shape (c, h, w) with zeros.'''
-    return np.pad(x, ((0, 0), (p, p), (p, p)), mode='constant', constant_values=0)
-
-
-Pad: Lambda = Lambda(partial(pad, p=2))
 
 
 Elu: Lambda = Lambda(elu)
@@ -106,7 +103,7 @@ class BaselineDecoder(Sequential):
                 ConvTranspose2d(64, 32, kernel_size=(5, 5), stride=(2, 2), padding=(2, 2), output_padding=(1, 1), key=keys[3]),
                 Elu,
                 ConvTranspose2d(32, 1, kernel_size=(5, 5), stride=(1, 1), padding=(4, 4), key=keys[4]),
-                Pad,
+                Lambda(partial(pad, p=2)),
             ]
         )
 
