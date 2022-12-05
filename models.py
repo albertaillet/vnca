@@ -41,6 +41,13 @@ def double(x: Array) -> Array:
 Double: Lambda = Lambda(double)
 
 
+def pad(x: Array, p: int) -> Array:
+    '''Pad an image of shape (c, h, w) with zeros.'''
+    return np.pad(x, ((0, 0), (p, p), (p, p)), mode='constant', constant_values=0)
+
+
+Pad: Lambda = Lambda(partial(pad, p=2))
+
 Elu: Lambda = Lambda(elu)
 
 
@@ -49,7 +56,7 @@ class Encoder(Sequential):
         keys = split(key, 6)
         super().__init__(
             [
-                Conv2d(1, 32, kernel_size=(5, 5), stride=(1, 1), padding=(4, 4), key=keys[0]),
+                Conv2d(1, 32, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2), key=keys[0]),
                 Elu,
                 Conv2d(32, 64, kernel_size=(5, 5), stride=(2, 2), padding=(2, 2), key=keys[1]),
                 Elu,
@@ -90,6 +97,7 @@ class BaselineDecoder(Sequential):
                 ConvTranspose2d(64, 32, kernel_size=(5, 5), stride=(2, 2), padding=(2, 2), output_padding=(1, 1), key=keys[3]),
                 Elu,
                 ConvTranspose2d(32, 1, kernel_size=(5, 5), stride=(1, 1), padding=(4, 4), key=keys[4]),
+                Pad,
             ]
         )
 
@@ -171,12 +179,7 @@ def crop(x: Array, size: Tuple[int, int, int]) -> Array:
     c, h, w = size
     ch, cw = x.shape[-2:]
     hh, ww = (h - ch) // 2, (w - cw) // 2
-    return x[:c, hh:-hh, ww:-ww]
-
-
-def pad(x: Array, pad_size: int) -> Array:
-    '''Pad an image of shape (c, h, w) with zeros.'''
-    return np.pad(x, ((0, 0), (pad_size, pad_size), (pad_size, pad_size)), mode='constant', constant_values=0)
+    return x[:c, hh : h - hh, ww : w - ww]
 
 
 class DoublingVNCA(Module):
@@ -206,9 +209,8 @@ class DoublingVNCA(Module):
         # vmap decoder over the M samples
         z = vmap(self.decoder)(z)
 
-        # resize the image to the original size
-        # z = vmap(crop, in_axes=(0, None))(z, x.shape)
-
+        # Crop to the original size
+        z = vmap(partial(crop, shape=x.shape))(z)
         return z, mean, logvar
 
     def decoder(self, z: Array) -> Array:
@@ -228,23 +230,23 @@ class DoublingVNCA(Module):
         def process(z: Array) -> Array:
             '''Process a latent sample by taking the image channels, applying sigmoid and padding.'''
             logits = z[:n_channels]
-            avg = sigmoid(logits)
-            pad_size = ((2 ** (self.K)) - avg.shape[1]) // 2
-            return pad(avg, pad_size=pad_size)
+            probs = sigmoid(logits)
+            pad_size = ((2 ** (self.K)) - probs.shape[1]) // 2
+            return pad(probs, p=pad_size)
 
         # Decode the latent sample and save the processed image channels
-        stages_avg = []
+        stages_probs = []
         for _ in range(self.K):
             z = self.double(z)
-            stages_avg.append(process(z))
+            stages_probs.append(process(z))
             for i in range(self.N_nca_steps):
                 z = z + self.step(z)
-                stages_avg.append(process(z))
+                stages_probs.append(process(z))
 
         # Stack the samples and rearrange them into a grid
         ih, iw = self.K, self.N_nca_steps + 1  # image height and width
-        stages_avg = rearrange(stages_avg, '(ih iw) c h w -> c (ih h) (iw w)', ih=ih, iw=iw)
-        return stages_avg
+        stages_probs = rearrange(stages_probs, '(ih iw) c h w -> c (ih h) (iw w)', ih=ih, iw=iw)
+        return stages_probs
 
 
 class NonDoublingVNCA(Module):
@@ -261,16 +263,21 @@ class NonDoublingVNCA(Module):
         self.N_nca_steps = N_nca_steps
 
     def __call__(self, x: Array, *, key: PRNGKeyArray, M: int = 1) -> Tuple[Array, Array, Array]:
+        # get shape of input image
+        _, h, w = x.shape
+        
         # get parameters for the latent distribution
         mean, logvar = self.encoder(x)
 
         # sample from the latent distribution
         z = sample_gaussian(mean, logvar, (M, *mean.shape), key=key)
 
-        z = repeat(z, 'M c -> M c h w', h=28, w=28)
+        z = repeat(z, 'm c -> m c h w', h=h, w=w)
 
         # run the NCA steps
         for _ in range(self.N_nca_steps):
             z = z + vmap(self.step)(z)
 
+        # Crop to the original size
+        z = vmap(partial(crop, shape=x.shape))(z)
         return z, mean, logvar
