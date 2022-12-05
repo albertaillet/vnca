@@ -70,13 +70,15 @@ def load_mnist(batch_size: int, key: PRNGKeyArray) -> Tuple[Iterator, Iterator]:
     return dataset_iterator(train_dataset, batch_size, key), dataset_iterator(test_dataset, batch_size, key)
 
 
-def load_mnist_train_on_tpu(devices: list) -> Array:
+def load_mnist_on_tpu(devices: list) -> Tuple[Array, Array]:
     '''Load binarized MNIST dataset to TPU.'''
-    from jax import device_put_replicated
+    from jax import device_put_replicated, device_put_sharded
 
-    train_dataset, _ = get_mnist()
+    train_dataset, test_dataset = get_mnist()
 
-    return device_put_replicated(train_dataset, devices)
+    shard = [*rearrange(test_dataset, '(t s) c h w -> t s c h w', t=len(devices))]
+
+    return device_put_replicated(train_dataset, devices), device_put_sharded(shard, devices)
 
 
 def indicies_tpu_iterator(n_tpus: int, batch_size: int, dataset_size: int, gradient_steps: int, key: PRNGKeyArray, device_iterations: int):
