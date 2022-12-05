@@ -4,7 +4,7 @@ from jax.scipy.special import logsumexp
 from distrax import Normal, Bernoulli
 import equinox as eqx
 from equinox import filter_vmap
-from einops import reduce
+from einops import reduce, repeat
 
 # Typing
 from jax import Array
@@ -33,8 +33,12 @@ def iwelbo_loss(model: Module, x: Array, key: PRNGKeyArray, M: int = 1) -> float
     # KL divergence
     kl_div = reduce(latent.kl_divergence(post), 'b n -> b', 'sum')
 
+    # Repeat samples first for broadcasting
+    kl_div = repeat(kl_div, 'b -> b m', m=M)
+    xs = repeat(x, "b c h w -> b m c h w", m=M)
+
     # Log-likelihood or reconstruction loss
-    like = reduce(likelihood.log_prob(x), 'b m c h w -> b m', 'sum')
+    like = reduce(likelihood.log_prob(xs), 'b m c h w -> b m', 'sum')
 
     # Importance weights
     iw_loss = -np.mean(reduce(like - kl_div, "b m -> b", logsumexp) - np.log(M))
