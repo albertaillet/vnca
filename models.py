@@ -36,6 +36,12 @@ def double(x: Array) -> Array:
 Double: Lambda = Lambda(double)
 
 
+def pad(x: Array) -> Array:
+    return np.pad(x, ((0, 0), (2, 2), (2, 2)), mode='constant', constant_values=0)
+
+
+Pad: Lambda = Lambda(pad)
+
 Elu: Lambda = Lambda(elu)
 
 
@@ -44,7 +50,7 @@ class Encoder(Sequential):
         keys = split(key, 6)
         super().__init__(
             [
-                Conv2d(1, 32, kernel_size=(5, 5), stride=(1, 1), padding=(4, 4), key=keys[0]),
+                Conv2d(1, 32, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2), key=keys[0]),
                 Elu,
                 Conv2d(32, 64, kernel_size=(5, 5), stride=(2, 2), padding=(2, 2), key=keys[1]),
                 Elu,
@@ -85,6 +91,7 @@ class BaselineDecoder(Sequential):
                 ConvTranspose2d(64, 32, kernel_size=(5, 5), stride=(2, 2), padding=(2, 2), output_padding=(1, 1), key=keys[3]),
                 Elu,
                 ConvTranspose2d(32, 1, kernel_size=(5, 5), stride=(1, 1), padding=(4, 4), key=keys[4]),
+                Pad,
             ]
         )
 
