@@ -1,5 +1,7 @@
+import equinox as eqx
 from jax import numpy as np
 from jax.random import PRNGKey
+from jax.tree_util import tree_leaves
 from models import Module, BaselineVAE, DoublingVNCA, NonDoublingVNCA, Double
 from pytest import fixture
 
@@ -32,6 +34,13 @@ def test_doubling_vnca_shape(latent_sizes):
 def test_non_doubling_vnca_shape(latent_sizes):
     for latent_size in latent_sizes:
         assert output_shape(NonDoublingVNCA, latent_size) == (1, 1, 32, 32)
+
+
+def test_doubling_vnca_num_parameters():
+    key = PRNGKey(0)
+    model = DoublingVNCA(latent_size=256, key=key)
+    n_params = sum(x.size for x in tree_leaves(eqx.filter(model, eqx.is_array)))
+    assert n_params == 6_585_088  # Number of parameters in the original model
 
 
 @fixture
