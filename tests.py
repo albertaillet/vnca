@@ -21,14 +21,14 @@ def output_shape(Model: Module, latent_size: int) -> Tuple[int, int, int]:
 
 def test_baseline_shape(latent_sizes):
     for latent_size in latent_sizes:
-        assert output_shape(BaselineVAE, latent_size) == (1, 28, 28)
+        assert output_shape(BaselineVAE, latent_size) == (1, 1, 28, 28)
 
 
 def test_doubling_vnca_shape(latent_sizes):
     for latent_size in latent_sizes:
-        assert output_shape(DoublingVNCA, latent_size) == (latent_size, 32, 32)
+        assert output_shape(DoublingVNCA, latent_size) == (1, latent_size, 32, 32)
 
 
 def test_non_doubling_vnca_shape(latent_sizes):
     for latent_size in latent_sizes:
-        assert output_shape(NonDoublingVNCA, latent_size) == (latent_size, 28, 28)
+        assert output_shape(NonDoublingVNCA, latent_size) == (1, latent_size, 28, 28)
