@@ -1,3 +1,4 @@
+from jax._src.api import vmap
 import jax.numpy as np
 from jax.random import split, normal
 from jax.nn import elu
@@ -11,14 +12,14 @@ from functools import partial
 
 # typing
 from jax import Array
-from typing import Optional, Tuple
+from typing import Optional, Sequence, Tuple
 from jax.random import PRNGKeyArray
 
 
-def sample(mu: Array, logvar: Array, *, key: PRNGKeyArray) -> Array:
+def sample(mu: Array, logvar: Array, shape: Sequence[int], *, key: PRNGKeyArray) -> Array:
     std: Array = np.exp(0.5 * logvar)
     # use the reparameterization trick
-    return mu + std * normal(key, mu.shape)
+    return mu + std * normal(key, shape)
 
 
 def flatten(x: Array) -> Array:
@@ -60,9 +61,14 @@ class Encoder(Sequential):
         )
 
 
-class LinearDecoder(Linear):
+class LinearDecoder(Sequential):
     def __init__(self, latent_size: int, *, key: PRNGKeyArray):
-        super().__init__(in_features=latent_size, out_features=2048, key=key)
+        super().__init__(
+            [
+                Linear(in_features=latent_size, out_features=2048, key=key),
+                Lambda(partial(rearrange, pattern='(c h w) -> c h w', h=2, w=2, c=512)),
+            ]
+        )
 
 
 class BaselineDecoder(Sequential):
@@ -135,25 +141,32 @@ class BaselineVAE(Module):
         self.linear_decoder = LinearDecoder(latent_size=latent_size, key=key2)
         self.decoder = BaselineDecoder(key=key3)
 
-    def __call__(self, x: Array, *, key: PRNGKeyArray) -> Tuple[Array, Array, Array]:
+    def __call__(self, x: Array, *, key: PRNGKeyArray, M: int = 1) -> Tuple[Array, Array, Array]:
         # get parameters for the latent distribution
         mean, logvar = self.encoder(x)
 
-        # sample from the latent distribution
-        z = sample(mean, logvar, key=key)
+        # sample from the latent distribution M times
+        z = sample(mean, logvar, (M, *mean.shape), key=key)
 
         # decode the latent sample
-        z = self.linear_decoder(z)
-        z = rearrange(z, '(c h w) -> c h w', h=2, w=2, c=512)
+        z = vmap(self.linear_decoder)(z)
 
-        # reconstruct the image
-        recon_x = self.decoder(z)
+        # vmap over the M samples and reconstruct the image
+        recon_x = vmap(self.decoder)(z)
+
         return recon_x, mean, logvar
 
     def center(self) -> Array:
         c = self.linear_decoder(np.zeros(self.latent_size))
-        c = rearrange(c, '(c h w) -> c h w', h=2, w=2, c=512)
         return self.decoder(c)
+
+
+def crop(x: Array, size: Tuple[int, ...]) -> Array:
+    """Crop an image to a given size."""
+    c, h, w = size
+    ch, cw = x.shape[-2:]
+    hh, ww = (h - ch) // 2, (w - cw) // 2
+    return x[:c, hh:-hh, ww:-ww]
 
 
 class DoublingVNCA(Module):
@@ -164,7 +177,7 @@ class DoublingVNCA(Module):
     K: int
     N_nca_steps: int
 
-    def __init__(self, latent_size: int = 256, K: int = 5, N_nca_steps: int = 9, *, key: PRNGKeyArray) -> None:
+    def __init__(self, latent_size: int = 256, K: int = 5, N_nca_steps: int = 8, *, key: PRNGKeyArray) -> None:
         key1, key2 = split(key)
         self.encoder = Encoder(latent_size=latent_size, key=key1)
         self.step = NCAStep(latent_size=latent_size, key=key2)
@@ -173,23 +186,29 @@ class DoublingVNCA(Module):
         self.K = K
         self.N_nca_steps = N_nca_steps
 
-    def __call__(self, x: Array, *, key: PRNGKeyArray) -> Tuple[Array, Array, Array]:
+    def __call__(self, x: Array, *, key: PRNGKeyArray, M: int = 1) -> Tuple[Array, Array, Array]:
         # get parameters for the latent distribution
         mean, logvar = self.encoder(x)
 
-        # sample from the latent distribution
-        z = sample(mean, logvar, key=key)
-        z = rearrange(z, 'c -> c 1 1')
+        # sample from the latent distribution M times
+        z = sample(mean, logvar, (M, *mean.shape), key=key)
 
-        # run the doubling and NCA steps
+        # Add height and width dimensions
+        z = rearrange(z, 'M c -> M c 1 1')
+        # vmap over the M samples
+        z = vmap(self.decoder)(z)
 
+        # resize the image to the original size
+        # z = vmap(crop, in_axes=(0, None))(z, x.shape)
+
+        return z, mean, logvar
+
+    def decoder(self, z: Array) -> Array:
         for _ in range(self.K):
             z = self.double(z)
             for _ in range(self.N_nca_steps):
                 z = z + self.step(z)
-
-        # z, _ = doublings(z, self.step, self.double, self.K, self.N_nca_steps, False)
-        return z, mean, logvar
+        return z
 
 
 class NonDoublingVNCA(Module):
@@ -198,23 +217,24 @@ class NonDoublingVNCA(Module):
     latent_size: int
     N_nca_steps: int
 
-    def __init__(self, latent_size: int = 256, N_nca_steps: int = 9, *, key: PRNGKeyArray) -> None:
+    def __init__(self, latent_size: int = 256, N_nca_steps: int = 8, *, key: PRNGKeyArray) -> None:
         key1, key2 = split(key)
         self.encoder = Encoder(latent_size=latent_size, key=key1)
         self.step = NCAStep(latent_size=latent_size, key=key2)
         self.latent_size = latent_size
         self.N_nca_steps = N_nca_steps
 
-    def __call__(self, x: Array, *, key: PRNGKeyArray) -> Tuple[Array, Array, Array]:
+    def __call__(self, x: Array, *, key: PRNGKeyArray, M: int = 1) -> Tuple[Array, Array, Array]:
         # get parameters for the latent distribution
         mean, logvar = self.encoder(x)
 
         # sample from the latent distribution
-        z_0 = sample(mean, logvar, key=key)
-        z = repeat(z_0, 'c -> c h w', h=28, w=28)
+        z = sample(mean, logvar, (M, *mean.shape), key=key)
+
+        z = repeat(z, 'M c -> M c h w', h=28, w=28)
 
         # run the NCA steps
         for _ in range(self.N_nca_steps):
-            z = z + self.step(z)
+            z = z + vmap(self.step)(z)
 
         return z, mean, logvar
