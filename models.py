@@ -36,11 +36,11 @@ def double(x: Array) -> Array:
 Double: Lambda = Lambda(double)
 
 
-def pad(x: Array) -> Array:
-    return np.pad(x, ((0, 0), (2, 2), (2, 2)), mode='constant', constant_values=0)
+def pad(x: Array, *, pad) -> Array:
+    return np.pad(x, ((0, 0), (pad, pad), (pad, pad)), mode='constant', constant_values=0)
 
 
-Pad: Lambda = Lambda(pad)
+Pad: Lambda = Lambda(partial(pad, pad=2))
 
 Elu: Lambda = Lambda(elu)
 
