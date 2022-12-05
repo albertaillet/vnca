@@ -173,7 +173,7 @@ def crop(x: Array, size: Tuple[int, ...]) -> Array:
     c, h, w = size
     ch, cw = x.shape[-2:]
     hh, ww = (h - ch) // 2, (w - cw) // 2
-    return x[:c, hh:-hh, ww:-ww]
+    return x[:c, hh : h - hh, ww : w - ww]
 
 
 class DoublingVNCA(Module):
@@ -202,12 +202,12 @@ class DoublingVNCA(Module):
 
         # Add height and width dimensions
         z = rearrange(z, 'M c -> M c 1 1')
+
         # vmap over the M samples
         z = vmap(self.decoder)(z)
 
-        # resize the image to the original size
-        # z = vmap(crop, in_axes=(0, None))(z, x.shape)
-
+        # Crop to the original size
+        z = vmap(crop, in_axes=(0, None))(z, x.shape)
         return z, mean, logvar
 
     def decoder(self, z: Array) -> Array:
@@ -243,5 +243,8 @@ class NonDoublingVNCA(Module):
         # run the NCA steps
         for _ in range(self.N_nca_steps):
             z = z + vmap(self.step)(z)
+
+        # Crop to the original size
+        z = vmap(crop, in_axes=(0, None))(z, x.shape)
 
         return z, mean, logvar
