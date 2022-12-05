@@ -168,9 +168,9 @@ class BaselineVAE(Module):
         return self.decoder(c)
 
 
-def crop(x: Array, size: Tuple[int, ...]) -> Array:
+def crop(x: Array, shape: Tuple[int, ...]) -> Array:
     """Crop an image to a given size."""
-    c, h, w = size
+    c, h, w = shape
     ch, cw = x.shape[-2:]
     hh, ww = (h - ch) // 2, (w - cw) // 2
     return x[:c, hh : h - hh, ww : w - ww]
@@ -207,7 +207,7 @@ class DoublingVNCA(Module):
         z = vmap(self.decoder)(z)
 
         # Crop to the original size
-        z = vmap(crop, in_axes=(0, None))(z, x.shape)
+        z = vmap(partial(crop, shape=x.shape))(z)
         return z, mean, logvar
 
     def decoder(self, z: Array) -> Array:
@@ -232,19 +232,21 @@ class NonDoublingVNCA(Module):
         self.N_nca_steps = N_nca_steps
 
     def __call__(self, x: Array, *, key: PRNGKeyArray, M: int = 1) -> Tuple[Array, Array, Array]:
+        # get shape of input image
+        _, h, w = x.shape
+        
         # get parameters for the latent distribution
         mean, logvar = self.encoder(x)
 
         # sample from the latent distribution
         z = sample(mean, logvar, (M, *mean.shape), key=key)
 
-        z = repeat(z, 'M c -> M c h w', h=28, w=28)
+        z = repeat(z, 'M c -> M c h w', h=h, w=w)
 
         # run the NCA steps
         for _ in range(self.N_nca_steps):
             z = z + vmap(self.step)(z)
 
         # Crop to the original size
-        z = vmap(crop, in_axes=(0, None))(z, x.shape)
-
+        z = vmap(partial(crop, shape=x.shape))(z)
         return z, mean, logvar
