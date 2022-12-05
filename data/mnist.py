@@ -7,7 +7,7 @@ from numpy import genfromtxt, save, load
 
 # typing
 from jax import Array
-from typing import Iterator, Tuple, List, Dict
+from typing import Iterator, Tuple
 
 ROOT = Path('./data/raw/binarized_mnist')
 URL = 'http://www.cs.toronto.edu/~larocheh/public/datasets/binarized_mnist/'
