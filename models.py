@@ -1,7 +1,7 @@
-from jax._src.api import vmap
+from jax import vmap
 import jax.numpy as np
-from jax.random import split, normal
-from jax.nn import elu
+from jax.random import split, normal, bernoulli
+from jax.nn import elu, sigmoid
 
 from einops import rearrange, repeat
 
@@ -16,10 +16,15 @@ from typing import Optional, Sequence, Tuple
 from jax.random import PRNGKeyArray
 
 
-def sample(mu: Array, logvar: Array, shape: Sequence[int], *, key: PRNGKeyArray) -> Array:
+def sample_gaussian(mu: Array, logvar: Array, shape: Sequence[int], *, key: PRNGKeyArray) -> Array:
     std: Array = np.exp(0.5 * logvar)
     # use the reparameterization trick
-    return mu + std * normal(key, shape)
+    return mu + std * normal(key=key, shape=shape)
+
+
+def sample_bernoulli(logits: Array, shape: Sequence[int], *, key: PRNGKeyArray) -> Array:
+    p = sigmoid(logits)
+    return bernoulli(key=key, p=p, shape=shape)
 
 
 def flatten(x: Array) -> Array:
@@ -36,11 +41,12 @@ def double(x: Array) -> Array:
 Double: Lambda = Lambda(double)
 
 
-def pad(x: Array, *, pad) -> Array:
-    return np.pad(x, ((0, 0), (pad, pad), (pad, pad)), mode='constant', constant_values=0)
+def pad(x: Array, p: int) -> Array:
+    '''Pad an image of shape (c, h, w) with zeros.'''
+    return np.pad(x, ((0, 0), (p, p), (p, p)), mode='constant', constant_values=0)
 
 
-Pad: Lambda = Lambda(partial(pad, pad=2))
+Pad: Lambda = Lambda(partial(pad, p=2))
 
 Elu: Lambda = Lambda(elu)
 
@@ -153,7 +159,7 @@ class BaselineVAE(Module):
         mean, logvar = self.encoder(x)
 
         # sample from the latent distribution M times
-        z = sample(mean, logvar, (M, *mean.shape), key=key)
+        z = sample_gaussian(mean, logvar, (M, *mean.shape), key=key)
 
         # decode the latent sample
         z = vmap(self.linear_decoder)(z)
@@ -168,9 +174,9 @@ class BaselineVAE(Module):
         return self.decoder(c)
 
 
-def crop(x: Array, shape: Tuple[int, ...]) -> Array:
-    """Crop an image to a given size."""
-    c, h, w = shape
+def crop(x: Array, size: Tuple[int, int, int]) -> Array:
+    '''Crop an image to a given size.'''
+    c, h, w = size
     ch, cw = x.shape[-2:]
     hh, ww = (h - ch) // 2, (w - cw) // 2
     return x[:c, hh : h - hh, ww : w - ww]
@@ -198,12 +204,9 @@ class DoublingVNCA(Module):
         mean, logvar = self.encoder(x)
 
         # sample from the latent distribution M times
-        z = sample(mean, logvar, (M, *mean.shape), key=key)
+        z = sample_gaussian(mean, logvar, (M, *mean.shape), key=key)
 
-        # Add height and width dimensions
-        z = rearrange(z, 'M c -> M c 1 1')
-
-        # vmap over the M samples
+        # vmap decoder over the M samples
         z = vmap(self.decoder)(z)
 
         # Crop to the original size
@@ -211,11 +214,39 @@ class DoublingVNCA(Module):
         return z, mean, logvar
 
     def decoder(self, z: Array) -> Array:
+        # Add height and width dimensions
+        z = rearrange(z, 'c -> c 1 1')
         for _ in range(self.K):
             z = self.double(z)
             for _ in range(self.N_nca_steps):
                 z = z + self.step(z)
         return z
+
+    def growth_stages(self, n_channels: int = 1, *, key: PRNGKeyArray) -> Array:
+        z = sample_gaussian(np.zeros(self.latent_size), np.zeros(self.latent_size), (self.latent_size,), key=key)
+        # Add height and width dimensions
+        z = rearrange(z, 'c -> c 1 1')
+
+        def process(z: Array) -> Array:
+            '''Process a latent sample by taking the image channels, applying sigmoid and padding.'''
+            logits = z[:n_channels]
+            probs = sigmoid(logits)
+            pad_size = ((2 ** (self.K)) - probs.shape[1]) // 2
+            return pad(probs, p=pad_size)
+
+        # Decode the latent sample and save the processed image channels
+        stages_probs = []
+        for _ in range(self.K):
+            z = self.double(z)
+            stages_probs.append(process(z))
+            for i in range(self.N_nca_steps):
+                z = z + self.step(z)
+                stages_probs.append(process(z))
+
+        # Stack the samples and rearrange them into a grid
+        ih, iw = self.K, self.N_nca_steps + 1  # image height and width
+        stages_probs = rearrange(stages_probs, '(ih iw) c h w -> c (ih h) (iw w)', ih=ih, iw=iw)
+        return stages_probs
 
 
 class NonDoublingVNCA(Module):
@@ -239,9 +270,9 @@ class NonDoublingVNCA(Module):
         mean, logvar = self.encoder(x)
 
         # sample from the latent distribution
-        z = sample(mean, logvar, (M, *mean.shape), key=key)
+        z = sample_gaussian(mean, logvar, (M, *mean.shape), key=key)
 
-        z = repeat(z, 'M c -> M c h w', h=h, w=w)
+        z = repeat(z, 'm c -> m c h w', h=h, w=w)
 
         # run the NCA steps
         for _ in range(self.N_nca_steps):
