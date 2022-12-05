@@ -1,6 +1,6 @@
 from jax import numpy as np
 from jax.random import PRNGKey
-from models import Module, BaselineVAE, DoublingVNCA, NonDoublingVNCA
+from models import Module, BaselineVAE, DoublingVNCA, NonDoublingVNCA, Double
 from pytest import fixture
 
 from typing import Tuple
@@ -26,9 +26,69 @@ def test_baseline_shape(latent_sizes):
 
 def test_doubling_vnca_shape(latent_sizes):
     for latent_size in latent_sizes:
-        assert output_shape(DoublingVNCA, latent_size) == (1, latent_size, 32, 32)
+        assert output_shape(DoublingVNCA, latent_size) == (1, 1, latent_size, 32, 32)
 
 
 def test_non_doubling_vnca_shape(latent_sizes):
     for latent_size in latent_sizes:
         assert output_shape(NonDoublingVNCA, latent_size) == (1, latent_size, 28, 28)
+
+@fixture
+def img():
+    return np.array(
+        [
+            [
+                [1, 2],
+                [3, 4]
+            ]
+        ]
+    )
+
+@fixture
+def doubled_img():
+    return np.array(
+        [
+            [
+                [1, 1, 2, 2],
+                [1, 1, 2, 2],
+                [3, 3, 4, 4],
+                [3, 3, 4, 4]
+            ]
+        ]
+    )
+
+def test_double_shape(img, doubled_img):
+    assert np.all(Double(img) == doubled_img)
+
+
+>>>>>>> Stashed changes
+
+
+@fixture
+def img():
+    return np.array(
+        [
+            [
+                [1, 2],
+                [3, 4]
+            ]
+        ]
+    )
+
+@fixture
+def doubled_img():
+    return np.array(
+        [
+            [
+                [1, 1, 2, 2],
+                [1, 1, 2, 2],
+                [3, 3, 4, 4],
+                [3, 3, 4, 4]
+            ]
+        ]
+    )
+
+def test_double_shape(img, doubled_img):
+    assert np.all(Double(img) == doubled_img)
+
+
