@@ -27,6 +27,14 @@ def sample_bernoulli(logits: Array, shape: Sequence[int], *, key: PRNGKeyArray) 
     return bernoulli(key=key, p=p, shape=shape)
 
 
+def crop(x: Array, shape: Tuple[int, int, int]) -> Array:
+    '''Crop an image to a given size.'''
+    c, h, w = shape
+    ch, cw = x.shape[-2:]
+    hh, ww = (h - ch) // 2, (w - cw) // 2
+    return x[:c, hh : h - hh, ww : w - ww]
+
+
 def flatten(x: Array) -> Array:
     return rearrange(x, 'c h w -> (c h w)')
 
@@ -47,6 +55,7 @@ def pad(x: Array, p: int) -> Array:
 
 
 Pad: Lambda = Lambda(partial(pad, p=2))
+
 
 Elu: Lambda = Lambda(elu)
 
@@ -174,14 +183,6 @@ class BaselineVAE(Module):
         return self.decoder(c)
 
 
-def crop(x: Array, size: Tuple[int, int, int]) -> Array:
-    '''Crop an image to a given size.'''
-    c, h, w = size
-    ch, cw = x.shape[-2:]
-    hh, ww = (h - ch) // 2, (w - cw) // 2
-    return x[:c, hh : h - hh, ww : w - ww]
-
-
 class DoublingVNCA(Module):
     encoder: Encoder
     step: NCAStep
@@ -265,7 +266,7 @@ class NonDoublingVNCA(Module):
     def __call__(self, x: Array, *, key: PRNGKeyArray, M: int = 1) -> Tuple[Array, Array, Array]:
         # get shape of input image
         _, h, w = x.shape
-        
+
         # get parameters for the latent distribution
         mean, logvar = self.encoder(x)
 
