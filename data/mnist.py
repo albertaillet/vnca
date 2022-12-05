@@ -3,22 +3,22 @@ from jax.random import split, PRNGKeyArray, permutation, PRNGKey
 from einops import rearrange
 from pathlib import Path
 from urllib.request import urlopen
-from numpy import genfromtxt, save, load, bool8
+from numpy import genfromtxt, save, load
 
 # typing
 from jax import Array
-from typing import Iterator, Tuple, List, Dict
+from typing import Iterator, Tuple
 
 ROOT = Path('./data/raw/binarized_mnist')
 URL = 'http://www.cs.toronto.edu/~larocheh/public/datasets/binarized_mnist/'
-SPLITS = {'train': 'binarized_mnist_train.amat', 'val': 'binarized_mnist_valid.amat', 'test': 'binarized_mnist_test.amat'}
+LINKS = {'train': 'binarized_mnist_train.amat', 'val': 'binarized_mnist_valid.amat', 'test': 'binarized_mnist_test.amat'}
 
 
 def download_mnist(dir: Path) -> None:
     '''Download binarized MNIST dataset to directory.'''
 
     dir.mkdir(parents=True)
-    for s, file in SPLITS.items():
+    for s, file in LINKS.items():
         amat_path = dir / file
         print(f'Downloading {s}...', end='\r')
 
@@ -34,19 +34,18 @@ def download_mnist(dir: Path) -> None:
         print(f'Downloaded {s} to {npz_path}')
 
 
-def get_mnist(split: List[str] = ['train', 'val', 'test']) -> Dict[str, Array]:
+def get_mnist() -> Tuple[Array, Array]:
     '''Get binarized MNIST dataset.'''
 
     if not ROOT.exists():
         download_mnist(ROOT)
 
-    data = {}
-    for s in split:
-        assert s in SPLITS.keys(), f'Invalid split: {s}'
-        npz_path = ROOT / f'{s}.npy'
-        split_data = load(npz_path)
-        data[s] = np.array(split_data, dtype=np.float32)
-    return data
+    train_data = load(ROOT / 'train.npy')
+    val_data = load(ROOT / 'val.npy')
+    test_data = load(ROOT / 'test.npy')
+
+    train_data = np.concatenate([train_data, val_data], axis=0)
+    return train_data, test_data
 
 
 def get_indices(n: int, batch_size: int, key: PRNGKeyArray) -> Array:
@@ -59,8 +58,7 @@ def get_indices(n: int, batch_size: int, key: PRNGKeyArray) -> Array:
 
 def load_mnist(batch_size: int, key: PRNGKeyArray) -> Tuple[Iterator, Iterator]:
     '''Load binarized MNIST dataset.'''
-    mnist_data = get_mnist(split=['train', 'test'])
-    train_dataset, test_dataset = mnist_data['train'], mnist_data['test']
+    train_dataset, test_dataset = get_mnist()
 
     def dataset_iterator(dataset: Array, batch_size: int, key: PRNGKeyArray) -> Iterator:
         n = len(dataset)
@@ -76,8 +74,7 @@ def load_mnist_train_on_tpu(devices: list) -> Array:
     '''Load binarized MNIST dataset to TPU.'''
     from jax import device_put_replicated
 
-    mnist_data = get_mnist(split=['train'])
-    train_dataset = mnist_data['train']
+    train_dataset, _ = get_mnist()
 
     return device_put_replicated(train_dataset, devices)
 
