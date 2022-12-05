@@ -111,21 +111,19 @@ class BaselineDecoder(Sequential):
         )
 
 
-class Residual(Module):
-    conv1: Conv2d
-    conv2: Conv2d
-
+class Residual(Sequential):
     def __init__(self, latent_size: int, *, key: PRNGKeyArray) -> None:
         key1, key2 = split(key, 2)
-        self.conv1 = Conv2d(latent_size, latent_size, kernel_size=(1, 1), stride=(1, 1), key=key1)
-        self.conv2 = Conv2d(latent_size, latent_size, kernel_size=(1, 1), stride=(1, 1), key=key2)
+        super().__init__(
+            [
+                Conv2d(latent_size, latent_size, kernel_size=(1, 1), stride=(1, 1), key=key1),
+                Elu,
+                Conv2d(latent_size, latent_size, kernel_size=(1, 1), stride=(1, 1), key=key2),
+            ]
+        )
 
     def __call__(self, x: Array, *, key: Optional[PRNGKeyArray] = None) -> Array:
-        res = x
-        x = self.conv1(x)
-        x = elu(x)
-        x = self.conv2(x)
-        return x + res
+        return x + super().__call__(x, key=key)
 
 
 class Conv2dZeroInit(Conv2d):
