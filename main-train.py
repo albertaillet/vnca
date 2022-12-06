@@ -6,9 +6,7 @@ get_ipython().run_line_magic('cd', '/kaggle/working/vnca')
 
 
 # %%
-get_ipython().run_cell_magic(
-    'capture', '', '%pip install --upgrade jax tensorflow_probability tensorflow jaxlib numpy equinox einops optax distrax wandb'
-)
+get_ipython().run_cell_magic('capture', '', '%pip install --upgrade jax tensorflow_probability tensorflow jaxlib numpy equinox einops optax distrax wandb')
 
 
 # %%
@@ -66,7 +64,7 @@ LOGGING_KEY = PRNGKey(3)
 
 
 # %%
-@partial(pmap, axis_name='num_devices', static_broadcasted_argnums=(3,6), out_axes=(None, 0, 0))
+@partial(pmap, axis_name='num_devices', static_broadcasted_argnums=(3, 6), out_axes=(None, 0, 0))
 def make_step(data: Array, index: Array, params, static, key: PRNGKeyArray, opt_state: tuple, optim: GradientTransformation) -> Tuple[float, Module, Any]:
     def step(carry, index):
         params, opt_state, key = carry
@@ -86,13 +84,13 @@ def make_step(data: Array, index: Array, params, static, key: PRNGKeyArray, opt_
     return loss, params, opt_state
 
 
-@partial(pmap,axis_name='num_devices',static_broadcasted_argnums=(2,4,5))
+@partial(pmap, axis_name='num_devices', static_broadcasted_argnums=(2, 4, 5))
 def test_iwelbo(x: Array, params, static, key: PRNGKeyArray, M: int, batch_size: int):
     model = eqx.combine(params, static)
     key, subkey = split(key)
     indices = permutation(key, np.arange(len(x)))[:batch_size]  # Very inefficent
     loss = iwelbo_loss(model, x[indices], subkey, M=M)
-    return lax.pmean(loss,axis_name='num_devices')
+    return lax.pmean(loss, axis_name='num_devices')
 
 
 def save_model(model, step):
@@ -204,7 +202,7 @@ opt_state = device_put_replicated(opt_state, devices)
 pbar = tqdm(
     zip(
         range(wandb.config.n_tpu_steps),
-        mnist.indicies_tpu_iterator(n_tpus, wandb.config.batch_size_per_tpu, data.shape[1], wandb.config.n_tpu_steps, DATA_KEY, wandb.config.l), 
+        mnist.indicies_tpu_iterator(n_tpus, wandb.config.batch_size_per_tpu, data.shape[1], wandb.config.n_tpu_steps, DATA_KEY, wandb.config.l),
         train_keys,
         test_keys,
     ),
@@ -224,9 +222,16 @@ for i, idx, train_key, test_key in pbar:
             'loss': float(np.mean(loss)),
             'avg_step_time': (pbar.last_print_t - pbar.start_t) / i if i > 0 else None,
             'step_time': step_time,
-            'test_loss': float(test_iwelbo(test_data,params,static,test_key,
-                                           wandb.config.test_loss_batch_size,
-                                           wandb.config.test_loss_latent_samples)[0])
+            'test_loss': float(
+                test_iwelbo(
+                    test_data,
+                    params,
+                    static,
+                    test_key,
+                    wandb.config.test_loss_batch_size,
+                    wandb.config.test_loss_latent_samples,
+                )[0]
+            ),
         },
         step=n_gradient_steps,
     )
