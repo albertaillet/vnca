@@ -37,7 +37,7 @@ def crop(x: Array, shape: Tuple[int, int, int]) -> Array:
 
 def pad(x: Array, p: int) -> Array:
     '''Pad an image of shape (c, h, w) with zeros.'''
-    return np.pad(x, ((0, 0), (p, p), (p, p)), mode='constant', constant_values=0)
+    return np.pad(x, ((0, 0), (p, p), (p, p)), mode='constant', constant_values=0.0)
 
 
 def flatten(x: Array) -> Array:
