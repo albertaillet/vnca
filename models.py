@@ -79,17 +79,12 @@ class Encoder(Sequential):
         )
 
 
-class LinearDecoder(Sequential):
+class LinearDecoder(Linear):
     def __init__(self, latent_size: int, *, key: PRNGKeyArray):
-        super().__init__(
-            [
-                Linear(in_features=latent_size, out_features=2048, key=key),
-                Lambda(partial(rearrange, pattern='(c h w) -> c h w', h=2, w=2, c=512)),
-            ]
-        )
+        super().__init__(in_features=latent_size, out_features=2048, key=key)
 
 
-class BaselineDecoder(Sequential):
+class ConvolutionalDecoder(Sequential):
     def __init__(self, *, key: PRNGKeyArray):
         keys = split(key, 5)
         super().__init__(
@@ -103,7 +98,19 @@ class BaselineDecoder(Sequential):
                 ConvTranspose2d(64, 32, kernel_size=(5, 5), stride=(2, 2), padding=(2, 2), output_padding=(1, 1), key=keys[3]),
                 Elu,
                 ConvTranspose2d(32, 1, kernel_size=(5, 5), stride=(1, 1), padding=(4, 4), key=keys[4]),
-                Lambda(partial(pad, p=2)),
+            ]
+        )
+
+
+class BaselineDecoder(Sequential):
+    def __init__(self, latent_size: int, *, key: PRNGKeyArray):
+        key1, key2 = split(key, 2)
+        super().__init__(
+            [
+                LinearDecoder(latent_size, key=key1),
+                Lambda(partial(rearrange, pattern='(c h w) -> c h w', h=2, w=2, c=512)),  # reshape from 2048 to 512x2x2
+                ConvolutionalDecoder(key=key2),
+                Lambda(partial(pad, p=2)),  # pad from 28x28 to 32x32
             ]
         )
 
@@ -145,19 +152,7 @@ class NCAStep(Sequential):
         )
 
 
-class BaselineVAE(Module):
-    encoder: Encoder
-    linear_decoder: LinearDecoder
-    decoder: BaselineDecoder
-    latent_size: int
-
-    def __init__(self, latent_size: int = 256, *, key: PRNGKeyArray) -> None:
-        key1, key2, key3 = split(key, 3)
-        self.latent_size = latent_size
-        self.encoder = Encoder(latent_size=latent_size, key=key1)
-        self.linear_decoder = LinearDecoder(latent_size=latent_size, key=key2)
-        self.decoder = BaselineDecoder(key=key3)
-
+class AutoEncoder(Module):
     def __call__(self, x: Array, *, key: PRNGKeyArray, M: int = 1) -> Tuple[Array, Array, Array]:
         # get parameters for the latent distribution
         mean, logvar = self.encoder(x)
@@ -165,20 +160,44 @@ class BaselineVAE(Module):
         # sample from the latent distribution M times
         z = sample_gaussian(mean, logvar, (M, *mean.shape), key=key)
 
-        # decode the latent sample
-        z = vmap(self.linear_decoder)(z)
+        # vmap over the M samples and reconstruct the M images
+        x_hat = vmap(self.decoder)(z)
 
-        # vmap over the M samples and reconstruct the image
-        recon_x = vmap(self.decoder)(z)
+        # vmap over the M samples and crop the images to the original size
+        x_hat = vmap(partial(crop, shape=x.shape))(x_hat)
 
-        return recon_x, mean, logvar
+        return x_hat, mean, logvar
+
+    def encoder(self, x: Array) -> Array:
+        raise NotImplementedError
+
+    def decoder(self, z: Array) -> Array:
+        raise NotImplementedError
 
     def center(self) -> Array:
-        c = self.linear_decoder(np.zeros(self.latent_size))
-        return self.decoder(c)
+        z_center = np.zeros((self.latent_size))
+        return self.decoder(z_center)
+
+    def sample(self, *, key: PRNGKeyArray) -> Array:
+        mean = np.zeros(self.latent_size)
+        logvar = np.zeros(self.latent_size)
+        z = sample_gaussian(mean=mean, logvar=logvar, shape=(self.latent_size,), key=key)
+        return self.decoder(z)
 
 
-class DoublingVNCA(Module):
+class BaselineVAE(AutoEncoder):
+    encoder: Encoder
+    decoder: Sequential
+    latent_size: int
+
+    def __init__(self, latent_size: int = 256, *, key: PRNGKeyArray) -> None:
+        key1, key2 = split(key, 2)
+        self.latent_size = latent_size
+        self.encoder = Encoder(latent_size=latent_size, key=key1)
+        self.decoder = BaselineDecoder(latent_size=latent_size, key=key2)
+
+
+class DoublingVNCA(AutoEncoder):
     encoder: Encoder
     step: NCAStep
     double: Lambda
@@ -188,30 +207,18 @@ class DoublingVNCA(Module):
 
     def __init__(self, latent_size: int = 256, K: int = 5, N_nca_steps: int = 8, *, key: PRNGKeyArray) -> None:
         key1, key2 = split(key)
+        self.latent_size = latent_size
         self.encoder = Encoder(latent_size=latent_size, key=key1)
         self.step = NCAStep(latent_size=latent_size, key=key2)
         self.double = Double
-        self.latent_size = latent_size
         self.K = K
         self.N_nca_steps = N_nca_steps
-
-    def __call__(self, x: Array, *, key: PRNGKeyArray, M: int = 1) -> Tuple[Array, Array, Array]:
-        # get parameters for the latent distribution
-        mean, logvar = self.encoder(x)
-
-        # sample from the latent distribution M times
-        z = sample_gaussian(mean, logvar, (M, *mean.shape), key=key)
-
-        # vmap decoder over the M samples
-        z = vmap(self.decoder)(z)
-
-        # Crop to the original size
-        z = vmap(partial(crop, shape=x.shape))(z)
-        return z, mean, logvar
 
     def decoder(self, z: Array) -> Array:
         # Add height and width dimensions
         z = rearrange(z, 'c -> c 1 1')
+
+        # Apply the Doubling and NCA steps
         for _ in range(self.K):
             z = self.double(z)
             for _ in range(self.N_nca_steps):
@@ -220,6 +227,7 @@ class DoublingVNCA(Module):
 
     def growth_stages(self, n_channels: int = 1, *, key: PRNGKeyArray) -> Array:
         z = sample_gaussian(np.zeros(self.latent_size), np.zeros(self.latent_size), (self.latent_size,), key=key)
+        
         # Add height and width dimensions
         z = rearrange(z, 'c -> c 1 1')
 
@@ -245,35 +253,24 @@ class DoublingVNCA(Module):
         return stages_probs
 
 
-class NonDoublingVNCA(Module):
+class NonDoublingVNCA(AutoEncoder):
     encoder: Encoder
     step: NCAStep
     latent_size: int
     N_nca_steps: int
 
-    def __init__(self, latent_size: int = 256, N_nca_steps: int = 8, *, key: PRNGKeyArray) -> None:
+    def __init__(self, latent_size: int = 256, N_nca_steps: int = 36, *, key: PRNGKeyArray) -> None:
         key1, key2 = split(key)
         self.encoder = Encoder(latent_size=latent_size, key=key1)
         self.step = NCAStep(latent_size=latent_size, key=key2)
         self.latent_size = latent_size
         self.N_nca_steps = N_nca_steps
 
-    def __call__(self, x: Array, *, key: PRNGKeyArray, M: int = 1) -> Tuple[Array, Array, Array]:
-        # get shape of input image
-        _, h, w = x.shape
+    def decoder(self, z: Array) -> Array:
+        # repeat the latent sample over the image dimensions
+        z = repeat(z, 'c -> c h w', h=32, w=32)
 
-        # get parameters for the latent distribution
-        mean, logvar = self.encoder(x)
-
-        # sample from the latent distribution
-        z = sample_gaussian(mean, logvar, (M, *mean.shape), key=key)
-
-        z = repeat(z, 'm c -> m c h w', h=h, w=w)
-
-        # run the NCA steps
+        # Apply the NCA steps
         for _ in range(self.N_nca_steps):
-            z = z + vmap(self.step)(z)
-
-        # Crop to the original size
-        z = vmap(partial(crop, shape=x.shape))(z)
-        return z, mean, logvar
+            z = z + self.step(z)
+        return z
