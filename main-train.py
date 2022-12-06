@@ -7,7 +7,7 @@ get_ipython().run_line_magic('cd', '/kaggle/working/vnca')
 
 # %%
 get_ipython().run_cell_magic(
-    'capture', '', '%pip install --upgrade jax tensorflow_probability tensorflow jaxlib numpy equinox einops optax distrax wandb'
+    'capture', '', '%pip install --upgrade jax tensorflow_probability tensorflow jaxlib numpy equinox einops optax distrax wandb  # type: ignore'
 )
 
 
@@ -109,6 +109,7 @@ def restore_model(model_like, file_name, run_path=None):
 
 def to_img(x: Array) -> wandb.Image:
     '''Converts an array of shape (c, h, w) to a wandb Image'''
+    x = np.clip(x, 0, 1)
     return wandb.Image(numpy.array(255 * x, dtype=numpy.uint8)[0])
 
 
@@ -117,37 +118,34 @@ def to_grid(x: Array, ih: int, iw: int) -> Array:
     return rearrange(x, '(ih iw) c h w -> c (ih h) (iw w)', ih=ih, iw=iw)
 
 
-def log_center(model: AutoEncoder) -> wandb.Image:
-    center = model.center()
-    return to_img(center)
+def log_center(model: AutoEncoder) -> Array:
+    return model.center()
 
 
-def log_samples(model: AutoEncoder, ih: int = 4, iw: int = 8) -> wandb.Image:
-    keys = split(LOGGING_KEY, ih * iw)
+def log_samples(model: AutoEncoder, ih: int = 4, iw: int = 8, *, key: PRNGKeyArray) -> Array:
+    keys = split(key, ih * iw)
     samples = vmap(model.sample)(key=keys)
-    samples = to_grid(samples, ih=ih, iw=iw)
-    return to_img(samples)
+    return to_grid(samples, ih=ih, iw=iw)
 
 
-def log_reconstructions(model: AutoEncoder, ih: int = 4, iw: int = 8) -> wandb.Image:
-    x = test_data[: ih * iw]
-    reconstructions = vmap(model)(x, key=LOGGING_KEY)
-    reconstructions = to_grid(reconstructions, ih=ih, iw=iw)
-    return to_img(reconstructions)
+def log_reconstructions(model: AutoEncoder, data: Array, ih: int = 4, iw: int = 8, *, key: PRNGKeyArray) -> Array:
+    x = data[: ih * iw]
+    keys = split(key, ih * iw)
+    reconstructions, _, _ = vmap(model)(x, key=keys)
+    reconstructions = rearrange(reconstructions, 'n m c h w -> (n m) c h w')
+    return to_grid(reconstructions, ih=ih, iw=iw)
 
 
-def log_growth_stages(model: DoublingVNCA) -> wandb.Image:
-    stages = model.growth_stages(key=LOGGING_KEY)
-    stages = to_grid(stages, ih=model.K, iw=model.N_nca_steps + 1)
-    return to_img(stages)
+def log_growth_stages(model: DoublingVNCA, *, key: PRNGKeyArray) -> Array:
+    stages = model.growth_stages(key=key)
+    return to_grid(stages, ih=model.K, iw=model.N_nca_steps + 1)
 
 
-def log_nca_stages(model: NonDoublingVNCA, ih: int = 4) -> wandb.Image:
-    stages = model.nca_stages(key=LOGGING_KEY)
-    assert model.N_nca_steps % ih == 0, 'N_nca_steps must be divisible by ih'
-    iw = model.N_nca_steps // ih 
-    stages = rearrange(stages, '(ih iw) c h w -> c (ih h) (iw w)', ih=ih, iw=iw)
-    return to_img(stages)
+def log_nca_stages(model: NonDoublingVNCA, ih: int = 4, *, key: PRNGKeyArray) -> Array:
+    stages = model.nca_stages(key=key)
+    assert model.N_nca_steps % ih == 0, 'ih must be divide by N_nca_steps'
+    iw = model.N_nca_steps // ih
+    return to_grid(stages, ih=ih, iw=iw)
 
 
 # %%
@@ -233,11 +231,11 @@ for i, idx, train_key, test_key in pbar:
         save_model(model, n_gradient_steps)
         wandb.log(
             {
-                'center': log_center(model),
-                'reconstructions': log_reconstructions(model, test_data, test_key),
-                'samples': log_samples(model),
-                'growth_plot': log_growth_stages(model) if isinstance(model, DoublingVNCA) else None,
-                'nca_stages': log_nca_stages(model) if isinstance(model, NonDoublingVNCA) else None,
+                'center': to_img(log_center(model)),
+                'reconstructions': to_img(log_reconstructions(model, test_data[0], key=LOGGING_KEY)),
+                'samples': to_img(log_samples(model, key=LOGGING_KEY)),
+                'growth_plot': to_img(log_growth_stages(model, key=LOGGING_KEY)) if isinstance(model, DoublingVNCA) else None,
+                'nca_stages': to_img(log_nca_stages(model, key=LOGGING_KEY)) if isinstance(model, NonDoublingVNCA) else None,
             },
             step=n_gradient_steps,
         )
@@ -252,7 +250,7 @@ wandb.run.finish()
 # %%
 local_train_data, local_test_data = mnist.get_mnist()
 fig = local_test_data[29]
-plt.imshow(nn.sigmoid(model(fig, key=DATA_KEY)[0][0][0]), cmap='gray')
+plt.imshow(nn.sigmoid(model(fig, key=LOGGING_KEY)[0][0][0]), cmap='gray')
 plt.show()
 plt.imshow(np.pad(fig[0], ((2, 2), (2, 2))), cmap='gray')
 plt.show()
