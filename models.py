@@ -181,7 +181,7 @@ class AutoEncoder(Module):
     def sample(self, *, key: PRNGKeyArray) -> Array:
         mean = np.zeros(self.latent_size)
         logvar = np.zeros(self.latent_size)
-        z = sample_gaussian(mean=mean, logvar=logvar, shape=(self.latent_size,), key=key)
+        z = sample_gaussian(mean, logvar, shape=(self.latent_size,), key=key)
         return self.decoder(z)
 
 
@@ -226,7 +226,9 @@ class DoublingVNCA(AutoEncoder):
         return z
 
     def growth_stages(self, n_channels: int = 1, *, key: PRNGKeyArray) -> Array:
-        z = sample_gaussian(np.zeros(self.latent_size), np.zeros(self.latent_size), (self.latent_size,), key=key)
+        mean = np.zeros(self.latent_size)
+        logvar = np.zeros(self.latent_size)
+        z = sample_gaussian(mean, logvar, (self.latent_size,), key=key)
         
         # Add height and width dimensions
         z = rearrange(z, 'c -> c 1 1')
@@ -273,7 +275,9 @@ class NonDoublingVNCA(AutoEncoder):
         return z
 
     def nca_stages(self, n_channels: int = 1, *, key: PRNGKeyArray) -> Array:
-        z = sample_gaussian(np.zeros(self.latent_size), np.zeros(self.latent_size), (self.latent_size,), key=key)
+        mean = np.zeros(self.latent_size)
+        logvar = np.zeros(self.latent_size)
+        z = sample_gaussian(mean, logvar, (self.latent_size,), key=key)
         z = repeat(z, 'c -> c h w', h=32, w=32)
  
         def process(z: Array) -> Array:

@@ -1,13 +1,13 @@
 # %%
 from IPython import get_ipython
 
-get_ipython().system('git clone https://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@github.com/albertaillet/vnca.git -b iwelbo-test-loss  # type: ignore')
+get_ipython().system('git clone https://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@github.com/albertaillet/vnca.git -b log-outputs')
 get_ipython().run_line_magic('cd', '/kaggle/working/vnca')
 
 
 # %%
 get_ipython().run_cell_magic(
-    'capture', '', '%pip install --upgrade jax tensorflow_probability tensorflow jaxlib numpy equinox einops optax distrax wandb  # type: ignore'
+    'capture', '', '%pip install --upgrade jax tensorflow_probability tensorflow jaxlib numpy equinox einops optax distrax wandb'
 )
 
 
