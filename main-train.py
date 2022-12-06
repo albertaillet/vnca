@@ -1,4 +1,6 @@
 # %%
+from IPython import get_ipython
+
 get_ipython().system('git clone https://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@github.com/albertaillet/vnca.git -b iwelbo-test-loss  # type: ignore')
 get_ipython().run_line_magic('cd', '/kaggle/working/vnca')
 
@@ -41,13 +43,13 @@ import equinox as eqx
 import jax.numpy as np
 from jax.random import PRNGKey, split, permutation
 from jax import lax, nn
-from jax import pmap, local_device_count, local_devices, device_put_replicated, tree_map
+from jax import pmap, local_device_count, local_devices, device_put_replicated, tree_map, vmap
 from einops import rearrange
 from optax import adam, clip_by_global_norm, chain
 
 from data import mnist
 from loss import iwelbo_loss
-from models import BaselineVAE, DoublingVNCA
+from models import AutoEncoder, BaselineVAE, DoublingVNCA, NonDoublingVNCA
 
 # typing
 from jax import Array
@@ -60,6 +62,7 @@ from typing import Tuple
 MODEL_KEY = PRNGKey(0)
 DATA_KEY = PRNGKey(1)
 TEST_KEY = PRNGKey(2)
+LOGGING_KEY = PRNGKey(3)
 
 
 # %%
@@ -104,6 +107,49 @@ def restore_model(model_like, file_name, run_path=None):
     return model
 
 
+def to_img(x: Array) -> wandb.Image:
+    '''Converts an array of shape (c, h, w) to a wandb Image'''
+    return wandb.Image(numpy.array(255 * x, dtype=numpy.uint8)[0])
+
+
+def to_grid(x: Array, ih: int, iw: int) -> Array:
+    '''Rearranges a array of images with shape (n, c, h, w) to a grid of shape (c, ih*h, iw*w)'''
+    return rearrange(x, '(ih iw) c h w -> c (ih h) (iw w)', ih=ih, iw=iw)
+
+
+def log_center(model: AutoEncoder) -> wandb.Image:
+    center = model.center()
+    return to_img(center)
+
+
+def log_samples(model: AutoEncoder, ih: int = 4, iw: int = 8) -> wandb.Image:
+    keys = split(LOGGING_KEY, ih * iw)
+    samples = vmap(model.sample)(key=keys)
+    samples = to_grid(samples, ih=ih, iw=iw)
+    return to_img(samples)
+
+
+def log_reconstructions(model: AutoEncoder, ih: int = 4, iw: int = 8) -> wandb.Image:
+    x = test_data[: ih * iw]
+    reconstructions = vmap(model)(x, key=LOGGING_KEY)
+    reconstructions = to_grid(reconstructions, ih=ih, iw=iw)
+    return to_img(reconstructions)
+
+
+def log_growth_stages(model: DoublingVNCA) -> wandb.Image:
+    stages = model.growth_stages(key=LOGGING_KEY)
+    stages = to_grid(stages, ih=model.K, iw=model.N_nca_steps + 1)
+    return to_img(stages)
+
+
+def log_nca_stages(model: NonDoublingVNCA, ih: int = 4) -> wandb.Image:
+    stages = model.nca_stages(key=LOGGING_KEY)
+    assert model.N_nca_steps % ih == 0, 'N_nca_steps must be divisible by ih'
+    iw = model.N_nca_steps // ih 
+    stages = rearrange(stages, '(ih iw) c h w -> c (ih h) (iw w)', ih=ih, iw=iw)
+    return to_img(stages)
+
+
 # %%
 model = DoublingVNCA(key=MODEL_KEY)
 
@@ -117,6 +163,7 @@ n_tpus, devices
 wandb.init(project='vnca', entity='dladv-vnca')
 
 wandb.config.model_type = model.__class__.__name__
+wandb.config.latent_size = model.latent_size
 wandb.config.batch_size = 128
 wandb.config.batch_size_per_tpu = wandb.config.batch_size // n_tpus
 wandb.config.n_gradient_steps = 30_000
@@ -133,6 +180,8 @@ wandb.config.grad_norm_clip = 10.0
 
 wandb.config.model_key = MODEL_KEY
 wandb.config.data_key = DATA_KEY
+wandb.config.test_key = TEST_KEY
+wandb.config.logging_key = LOGGING_KEY
 wandb.config.log_every = 5_000
 
 
@@ -180,11 +229,18 @@ for i, idx, train_key, test_key in pbar:
     )
 
     if n_gradient_steps % wandb.config.log_every == 0:
+        model = eqx.combine(tree_map(partial(np.mean, axis=0), params), static)
         save_model(model, n_gradient_steps)
-        if isinstance(model, DoublingVNCA):
-            stages = model.growth_stages(key=DATA_KEY)
-            growth_plot = numpy.array(255 * stages, dtype=numpy.uint8)[0]
-            wandb.log({'growth_plot': wandb.Image(growth_plot)}, step=n_gradient_steps)
+        wandb.log(
+            {
+                'center': log_center(model),
+                'reconstructions': log_reconstructions(model, test_data, test_key),
+                'samples': log_samples(model),
+                'growth_plot': log_growth_stages(model) if isinstance(model, DoublingVNCA) else None,
+                'nca_stages': log_nca_stages(model) if isinstance(model, NonDoublingVNCA) else None,
+            },
+            step=n_gradient_steps,
+        )
 
 model = eqx.combine(tree_map(partial(np.mean, axis=0), params), static)
 

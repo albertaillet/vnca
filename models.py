@@ -247,10 +247,7 @@ class DoublingVNCA(AutoEncoder):
                 z = z + self.step(z)
                 stages_probs.append(process(z))
 
-        # Stack the samples and rearrange them into a grid
-        ih, iw = self.K, self.N_nca_steps + 1  # image height and width
-        stages_probs = rearrange(stages_probs, '(ih iw) c h w -> c (ih h) (iw w)', ih=ih, iw=iw)
-        return stages_probs
+        return np.array(stages_probs)
 
 
 class NonDoublingVNCA(AutoEncoder):
@@ -274,3 +271,19 @@ class NonDoublingVNCA(AutoEncoder):
         for _ in range(self.N_nca_steps):
             z = z + self.step(z)
         return z
+
+    def nca_stages(self, n_channels: int = 1, *, key: PRNGKeyArray) -> Array:
+        z = sample_gaussian(np.zeros(self.latent_size), np.zeros(self.latent_size), (self.latent_size,), key=key)
+        z = repeat(z, 'c -> c h w', h=32, w=32)
+ 
+        def process(z: Array) -> Array:
+            '''Process a latent sample by taking the image channels, applying sigmoid.'''
+            return sigmoid(z[:n_channels])
+ 
+        # Decode the latent sample and save the processed image channels
+        stages_probs = []
+        for _ in range(self.N_nca_steps):
+            z = z + self.step(z)
+            stages_probs.append(process(z))
+ 
+        return np.array(stages_probs)
