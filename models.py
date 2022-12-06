@@ -35,9 +35,9 @@ def crop(x: Array, shape: Tuple[int, int, int]) -> Array:
     return x[:c, hh : h - hh, ww : w - ww]
 
 
-def pad(x: Array, p: int) -> Array:
-    '''Pad an image of shape (c, h, w) with zeros.'''
-    return np.pad(x, ((0, 0), (p, p), (p, p)), mode='constant', constant_values=0)
+def pad(x: Array, p: int, c: float) -> Array:
+    '''Pad an image of shape (c, h, w) with contant c.'''
+    return np.pad(x, ((0, 0), (p, p), (p, p)), mode='constant', constant_values=c)
 
 
 def flatten(x: Array) -> Array:
@@ -50,6 +50,8 @@ Flatten: Lambda = Lambda(flatten)
 def double(x: Array) -> Array:
     return repeat(x, 'c h w -> c (h 2) (w 2)')
 
+
+Sigmoid: Lambda = Lambda(sigmoid)
 
 Double: Lambda = Lambda(double)
 
@@ -110,7 +112,7 @@ class BaselineDecoder(Sequential):
                 LinearDecoder(latent_size, key=key1),
                 Lambda(partial(rearrange, pattern='(c h w) -> c h w', h=2, w=2, c=512)),  # reshape from 2048 to 512x2x2
                 ConvolutionalDecoder(key=key2),
-                Lambda(partial(pad, p=2)),  # pad from 28x28 to 32x32
+                Lambda(partial(pad, p=2, c=float('-inf'))),  # pad from 28x28 to 32x32
             ]
         )
 
@@ -238,7 +240,7 @@ class DoublingVNCA(AutoEncoder):
             logits = z[:n_channels]
             probs = sigmoid(logits)
             pad_size = ((2 ** (self.K)) - probs.shape[1]) // 2
-            return pad(probs, p=pad_size)
+            return pad(probs, p=pad_size, c=0.0)
 
         # Decode the latent sample and save the processed image channels
         stages_probs = []

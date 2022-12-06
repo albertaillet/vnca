@@ -45,7 +45,7 @@ def get_mnist() -> Tuple[Array, Array]:
     test_data = load(ROOT / 'test.npy')
 
     train_data = np.concatenate([train_data, val_data], axis=0)
-    
+
     test_data = np.pad(test_data, ((0, 0), (0, 0), (2, 2), (2, 2)), mode='constant', constant_values=0)
     train_data = np.pad(train_data, ((0, 0), (0, 0), (2, 2), (2, 2)), mode='constant', constant_values=0)
 
