@@ -27,7 +27,7 @@ def iwelbo_loss(model: Module, x: Array, key: PRNGKeyArray, M: int = 1) -> float
     latent = Normal(mean, np.exp(1 / 2 * logvar))
 
     # Likelihood p_{\theta}(x|z)
-    likelihood = Bernoulli(probs=recon_x)
+    likelihood = Bernoulli(logits=recon_x)
 
     # KL divergence
     kl_div = reduce(latent.kl_divergence(post), 'b n -> b', 'sum')

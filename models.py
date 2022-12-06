@@ -37,7 +37,7 @@ def crop(x: Array, shape: Tuple[int, int, int]) -> Array:
 
 def pad(x: Array, p: int) -> Array:
     '''Pad an image of shape (c, h, w) with zeros.'''
-    return np.pad(x, ((0, 0), (p, p), (p, p)), mode='constant', constant_values=0.0)
+    return np.pad(x, ((0, 0), (p, p), (p, p)), mode='constant', constant_values=float('-inf'))
 
 
 def flatten(x: Array) -> Array:
@@ -105,7 +105,6 @@ class BaselineDecoder(Sequential):
                 ConvTranspose2d(64, 32, kernel_size=(5, 5), stride=(2, 2), padding=(2, 2), output_padding=(1, 1), key=keys[3]),
                 Elu,
                 ConvTranspose2d(32, 1, kernel_size=(5, 5), stride=(1, 1), padding=(4, 4), key=keys[4]),
-                Sigmoid,
                 Lambda(partial(pad, p=2)),
             ]
         )
@@ -210,6 +209,10 @@ class DoublingVNCA(Module):
 
         # Crop to the original size
         z = vmap(partial(crop, shape=x.shape))(z)
+
+        # Make output into a probability distribution
+        z = sigmoid(z)
+
         return z, mean, logvar
 
     def decoder(self, z: Array) -> Array:
@@ -219,7 +222,7 @@ class DoublingVNCA(Module):
             z = self.double(z)
             for _ in range(self.N_nca_steps):
                 z = z + self.step(z)
-        return sigmoid(z)
+        return z
 
     def growth_stages(self, n_channels: int = 1, *, key: PRNGKeyArray) -> Array:
         z = sample_gaussian(np.zeros(self.latent_size), np.zeros(self.latent_size), (self.latent_size,), key=key)
