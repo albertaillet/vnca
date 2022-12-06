@@ -127,7 +127,7 @@ def log_samples(model: AutoEncoder, ih: int = 4, iw: int = 8, *, key: PRNGKeyArr
 
 
 def log_reconstructions(model: AutoEncoder, data: Array, ih: int = 4, iw: int = 8, *, key: PRNGKeyArray) -> Array:
-    x = data[: ih * iw]
+    x = permutation(key, data, axis=0)[: ih * iw]
     keys = split(key, ih * iw)
     reconstructions, _, _ = vmap(model)(x, key=keys)
     reconstructions = rearrange(reconstructions, 'n m c h w -> (n m) c h w')
