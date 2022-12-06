@@ -35,9 +35,9 @@ def crop(x: Array, shape: Tuple[int, int, int]) -> Array:
     return x[:c, hh : h - hh, ww : w - ww]
 
 
-def pad(x: Array, p: int) -> Array:
-    '''Pad an image of shape (c, h, w) with zeros.'''
-    return np.pad(x, ((0, 0), (p, p), (p, p)), mode='constant', constant_values=float('-inf'))
+def pad(x: Array, p: int, c: float) -> Array:
+    '''Pad an image of shape (c, h, w) with contant c.'''
+    return np.pad(x, ((0, 0), (p, p), (p, p)), mode='constant', constant_values=c)
 
 
 def flatten(x: Array) -> Array:
@@ -105,7 +105,7 @@ class BaselineDecoder(Sequential):
                 ConvTranspose2d(64, 32, kernel_size=(5, 5), stride=(2, 2), padding=(2, 2), output_padding=(1, 1), key=keys[3]),
                 Elu,
                 ConvTranspose2d(32, 1, kernel_size=(5, 5), stride=(1, 1), padding=(4, 4), key=keys[4]),
-                Lambda(partial(pad, p=2)),
+                Lambda(partial(pad, p=2, c=float('-inf'))),
             ]
         )
 
@@ -210,9 +210,6 @@ class DoublingVNCA(Module):
         # Crop to the original size
         z = vmap(partial(crop, shape=x.shape))(z)
 
-        # Make output into a probability distribution
-        z = sigmoid(z)
-
         return z, mean, logvar
 
     def decoder(self, z: Array) -> Array:
@@ -234,7 +231,7 @@ class DoublingVNCA(Module):
             logits = z[:n_channels]
             probs = sigmoid(logits)
             pad_size = ((2 ** (self.K)) - probs.shape[1]) // 2
-            return pad(probs, p=pad_size)
+            return pad(probs, p=pad_size, c=0.0)
 
         # Decode the latent sample and save the processed image channels
         stages_probs = []
@@ -282,8 +279,5 @@ class NonDoublingVNCA(Module):
 
         # Crop to the original size
         z = vmap(partial(crop, shape=x.shape))(z)
-
-        # Make output into a probability distribution
-        z = sigmoid(z)
 
         return z, mean, logvar
