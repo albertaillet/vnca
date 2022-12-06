@@ -12,7 +12,6 @@ from jax.random import PRNGKeyArray
 from equinox import Module
 
 
-@eqx.filter_value_and_grad
 def iwelbo_loss(model: Module, x: Array, key: PRNGKeyArray, M: int = 1) -> float:
 
     # Split the key to have one for each sample
@@ -33,7 +32,7 @@ def iwelbo_loss(model: Module, x: Array, key: PRNGKeyArray, M: int = 1) -> float
     # KL divergence
     kl_div = reduce(latent.kl_divergence(post), 'b n -> b', 'sum')
 
-    # Repeat samples first for broadcasting
+    # Repeat samples for broadcasting
     kl_div = repeat(kl_div, 'b -> b m', m=M)
     xs = repeat(x, 'b c h w -> b m c h w', m=M)
 
