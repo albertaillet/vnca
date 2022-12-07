@@ -4,3 +4,4 @@ data/raw/
 sandbox.*
 .DS_Store
 *.ipynb
+models/

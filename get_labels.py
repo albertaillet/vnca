@@ -49,9 +49,21 @@ train_labels[train_idx]
 
 
 # %%
+train_idx = np.load('./data/raw/binarized_mnist/labels/train_label_indices.npy')
+binarized_train_labels = train_labels[train_idx]
+np.save('./data/raw/binarized_mnist/labels/binarized_train_labels', binarized_train_labels)
+
+
+# %%
 _, test_idx = lax.scan(partial(get_label, non_binarized_images=test_data), 0, test_data_binarized)
 np.save('./data/raw/binarized_mnist/labels/test_label_indices', test_idx)
 test_labels[test_idx]
+
+
+# %%
+test_idx = np.load('./data/raw/binarized_mnist/labels/test_label_indices.npy')
+binarized_test_labels = test_labels[test_idx]
+np.save('./data/raw/binarized_mnist/labels/binarized_test_labels', binarized_test_labels)
 
 
 # %%
