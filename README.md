@@ -1,4 +1,4 @@
-# Re-implemnetation of Variational Neural Cellular Automata [1]
+# Re-implemenetation of Variational Neural Cellular Automata [1]
 
 The repository contains code for the reproduction of the results from "Variational Neural Cellular Automata" [1]. 
 
