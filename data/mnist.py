@@ -34,7 +34,7 @@ def download_mnist(dir: Path) -> None:
         print(f'Downloaded {s} to {npz_path}')
 
 
-def get_mnist() -> Tuple[Array, Array]:
+def get_mnist(pad: int = 2) -> Tuple[Array, Array]:
     '''Get binarized MNIST dataset.'''
 
     if not ROOT.exists():
@@ -46,8 +46,8 @@ def get_mnist() -> Tuple[Array, Array]:
 
     train_data = np.concatenate([train_data, val_data], axis=0)
 
-    test_data = np.pad(test_data, ((0, 0), (0, 0), (2, 2), (2, 2)), mode='constant', constant_values=0)
-    train_data = np.pad(train_data, ((0, 0), (0, 0), (2, 2), (2, 2)), mode='constant', constant_values=0)
+    test_data = np.pad(test_data, ((0, 0), (0, 0), (pad, pad), (pad, pad)), mode='constant', constant_values=0)
+    train_data = np.pad(train_data, ((0, 0), (0, 0), (pad, pad), (pad, pad)), mode='constant', constant_values=0)
 
     return train_data, test_data
 
