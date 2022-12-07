@@ -52,8 +52,9 @@ def log_samples(model: AutoEncoder, ih: int = 4, iw: int = 8, *, key: PRNGKeyArr
 
 @eqx.filter_jit
 def log_reconstructions(model: AutoEncoder, data: Array, ih: int = 4, iw: int = 8, *, key: PRNGKeyArray) -> Array:
-    x = randint(key, (ih * iw,), 0, len(data))
+    idx = randint(key, (ih * iw,), 0, len(data))
     keys = split(key, ih * iw)
+    x = data[idx]
     reconstructions, _, _ = vmap(model)(x, key=keys)
     reconstructions = rearrange(reconstructions, 'n m c h w -> (n m) c h w')
     reconstructions = sigmoid(reconstructions)
