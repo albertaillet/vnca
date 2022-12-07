@@ -8,32 +8,21 @@ from pytest import fixture
 from typing import Tuple
 
 
-@fixture
-def latent_sizes():
-    return (1, 64, 128, 256)
-
-
-def output_shape(Model: Module, latent_size: int) -> Tuple[int, int, int]:
+def test_shapes():
+    '''Test that the models output the correct shapes for different batch sizes'''
     key = PRNGKey(0)
     x = np.zeros((1, 32, 32))
-    model = Model(latent_size=latent_size, key=key)
-    recon_x, _, _ = model(x, key=key)
-    return recon_x.shape
 
-
-def test_baseline_shape(latent_sizes):
-    for latent_size in latent_sizes:
-        assert output_shape(BaselineVAE, latent_size) == (1, 1, 32, 32)
-
-
-def test_doubling_vnca_shape(latent_sizes):
-    for latent_size in latent_sizes:
-        assert output_shape(DoublingVNCA, latent_size) == (1, 1, 32, 32)
-
-
-def test_non_doubling_vnca_shape(latent_sizes):
-    for latent_size in latent_sizes:
-        assert output_shape(NonDoublingVNCA, latent_size) == (1, 1, 32, 32)
+    for Model in (BaselineVAE, DoublingVNCA, NonDoublingVNCA):
+        for latent_size in (1, 64, 128, 256):
+            model = Model(latent_size=latent_size, key=key)
+            for m in (1, 2):
+                recon_x, mean, logvar = model(x, key=key, M=m)
+                assert recon_x.shape == (m, 1, 32, 32)
+                assert mean.shape == logvar.shape == (latent_size,)
+                assert np.any(np.isnan(recon_x)) == False
+                assert np.any(np.isnan(mean)) == False
+                assert np.any(np.isnan(logvar)) == False
 
 
 def test_doubling_vnca_num_parameters():
