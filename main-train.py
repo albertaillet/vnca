@@ -47,7 +47,7 @@ from optax import adam, clip_by_global_norm, chain
 from data import binarized_mnist
 from loss import iwelbo_loss
 from models import AutoEncoder, BaselineVAE, DoublingVNCA, NonDoublingVNCA
-from logging import save_model, restore_model, to_img, log_center, log_samples, log_reconstructions, log_growth_stages, log_nca_stages
+from log import save_model, restore_model, to_img, log_center, log_samples, log_reconstructions, log_growth_stages, log_nca_stages
 
 # typing
 from jax import Array
