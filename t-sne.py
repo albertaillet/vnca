@@ -41,7 +41,7 @@ from functools import partial
 import numpy as onp
 import matplotlib.pyplot as plt
 
-from data.mnist import get_mnist
+from data import binarized_mnist
 
 import equinox as eqx
 from models import AutoEncoder, BaselineVAE, DoublingVNCA, NonDoublingVNCA, sample_gaussian
@@ -56,7 +56,7 @@ DATA_KEY = random.PRNGKey(0)
 
 # %%
 # Load the data
-_, test_data = get_mnist()
+_, test_data = binarized_mnist.get_data()
 test_labels = np.load('../../input/tsne-20221207-ver2/binarized_test_labels.npy')
 
 

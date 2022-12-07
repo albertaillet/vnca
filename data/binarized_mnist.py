@@ -1,5 +1,6 @@
 import jax.numpy as np
 from jax.random import split, PRNGKeyArray, permutation, PRNGKey
+from jax import device_put_replicated, device_put_sharded
 from einops import rearrange
 from pathlib import Path
 from urllib.request import urlopen
@@ -14,7 +15,7 @@ URL = 'http://www.cs.toronto.edu/~larocheh/public/datasets/binarized_mnist/'
 LINKS = {'train': 'binarized_mnist_train.amat', 'val': 'binarized_mnist_valid.amat', 'test': 'binarized_mnist_test.amat'}
 
 
-def download_mnist(dir: Path) -> None:
+def download_data(dir: Path) -> None:
     '''Download binarized MNIST dataset to directory.'''
 
     dir.mkdir(parents=True)
@@ -34,11 +35,11 @@ def download_mnist(dir: Path) -> None:
         print(f'Downloaded {s} to {npz_path}')
 
 
-def get_mnist(pad: int = 2) -> Tuple[Array, Array]:
+def get_data(pad: int = 2) -> Tuple[Array, Array]:
     '''Get binarized MNIST dataset.'''
 
     if not ROOT.exists():
-        download_mnist(ROOT)
+        download_data(ROOT)
 
     train_data = load(ROOT / 'train.npy')
     val_data = load(ROOT / 'val.npy')
@@ -60,9 +61,9 @@ def get_indices(n: int, batch_size: int, key: PRNGKeyArray) -> Array:
     return indices  # reshape into (n_batches, batch_size)
 
 
-def load_mnist(batch_size: int, key: PRNGKeyArray) -> Tuple[Iterator, Iterator]:
+def load_data(batch_size: int, key: PRNGKeyArray) -> Tuple[Iterator, Iterator]:
     '''Load binarized MNIST dataset.'''
-    train_dataset, test_dataset = get_mnist()
+    train_dataset, test_dataset = get_data()
 
     def dataset_iterator(dataset: Array, batch_size: int, key: PRNGKeyArray) -> Iterator:
         n = len(dataset)
@@ -74,11 +75,12 @@ def load_mnist(batch_size: int, key: PRNGKeyArray) -> Tuple[Iterator, Iterator]:
     return dataset_iterator(train_dataset, batch_size, key), dataset_iterator(test_dataset, batch_size, key)
 
 
-def load_mnist_on_tpu(devices: list, *, key: PRNGKeyArray) -> Tuple[Array, Array]:
-    '''Load binarized MNIST dataset to TPU.'''
-    from jax import device_put_replicated, device_put_sharded
+def load_data_on_tpu(devices: list, *, key: PRNGKeyArray) -> Tuple[Array, Array]:
+    '''Load binarized MNIST dataset to TPU.
+    The training set is replicated across all devices and the test set is sharded across all devices.
+    '''
 
-    train_dataset, test_dataset = get_mnist()
+    train_dataset, test_dataset = get_data()
 
     test_dataset = permutation(key, test_dataset, axis=0)
 
@@ -100,6 +102,6 @@ def indicies_tpu_iterator(n_tpus: int, batch_size: int, dataset_size: int, gradi
 
 
 if __name__ == '__main__':
-    train_dataset, test_dataset = load_mnist(32, PRNGKey(0))
+    train_dataset, test_dataset = load_data(32, PRNGKey(0))
     print(next(train_dataset).shape)
     print(next(test_dataset).shape)
