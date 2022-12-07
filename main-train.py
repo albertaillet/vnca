@@ -39,9 +39,9 @@ import matplotlib.pyplot as plt
 
 import equinox as eqx
 import jax.numpy as np
-from jax.random import PRNGKey, split, permutation
+from jax.random import PRNGKey, split, permutation, randint
 from jax import lax, nn
-from jax import pmap, local_device_count, local_devices, device_put_replicated, tree_map, vmap
+from jax import jit, pmap, local_device_count, local_devices, device_put_replicated, tree_map, vmap
 from einops import rearrange
 from optax import adam, clip_by_global_norm, chain
 
@@ -88,7 +88,7 @@ def make_step(data: Array, index: Array, params, static, key: PRNGKeyArray, opt_
 def test_iwelbo(x: Array, params, static, key: PRNGKeyArray, M: int, batch_size: int):
     model = eqx.combine(params, static)
     key, subkey = split(key)
-    indices = permutation(key, np.arange(len(x)))[:batch_size]  # Very inefficent
+    indices = randint(key, (batch_size,), 0, len(x))
     loss = iwelbo_loss(model, x[indices], subkey, M=M)
     return lax.pmean(loss, axis_name='num_devices')
 
@@ -111,34 +111,40 @@ def to_img(x: Array) -> wandb.Image:
     return wandb.Image(numpy.array(255 * x, dtype=numpy.uint8)[0])
 
 
+@eqx.filter_jit
 def to_grid(x: Array, ih: int, iw: int) -> Array:
     '''Rearranges a array of images with shape (n, c, h, w) to a grid of shape (c, ih*h, iw*w)'''
     return rearrange(x, '(ih iw) c h w -> c (ih h) (iw w)', ih=ih, iw=iw)
 
 
+@eqx.filter_jit
 def log_center(model: AutoEncoder) -> Array:
     return model.center()
 
 
+@eqx.filter_jit
 def log_samples(model: AutoEncoder, ih: int = 4, iw: int = 8, *, key: PRNGKeyArray) -> Array:
     keys = split(key, ih * iw)
     samples = vmap(model.sample)(key=keys)
     return to_grid(samples, ih=ih, iw=iw)
 
 
+@eqx.filter_jit
 def log_reconstructions(model: AutoEncoder, data: Array, ih: int = 4, iw: int = 8, *, key: PRNGKeyArray) -> Array:
-    x = permutation(key, data, axis=0)[: ih * iw]
+    x = randint(key, (ih * iw,), 0, len(data))
     keys = split(key, ih * iw)
     reconstructions, _, _ = vmap(model)(x, key=keys)
     reconstructions = rearrange(reconstructions, 'n m c h w -> (n m) c h w')
     return to_grid(reconstructions, ih=ih, iw=iw)
 
 
+@eqx.filter_jit
 def log_growth_stages(model: DoublingVNCA, *, key: PRNGKeyArray) -> Array:
     stages = model.growth_stages(key=key)
     return to_grid(stages, ih=model.K, iw=model.N_nca_steps + 1)
 
 
+@eqx.filter_jit
 def log_nca_stages(model: NonDoublingVNCA, ih: int = 4, *, key: PRNGKeyArray) -> Array:
     stages = model.nca_stages(key=key)
     assert model.N_nca_steps % ih == 0, 'ih must be divide by N_nca_steps'
@@ -160,28 +166,25 @@ wandb.init(project='vnca', entity='dladv-vnca')
 
 wandb.config.model_type = model.__class__.__name__
 wandb.config.latent_size = model.latent_size
-wandb.config.batch_size = 128
+wandb.config.batch_size = 32
 wandb.config.batch_size_per_tpu = wandb.config.batch_size // n_tpus
-wandb.config.n_gradient_steps = 600_000
-wandb.config.l = 2500
+wandb.config.n_gradient_steps = 100_000
+wandb.config.l = 250
 wandb.config.n_tpu_steps = wandb.config.n_gradient_steps // wandb.config.l
 
 wandb.config.test_loss_batch_size = 8
 wandb.config.test_loss_latent_samples = 128
+wandb.config.beta = 1
 
 wandb.config.n_tpus = n_tpus
-wandb.config.lr = 0.00004  # 1e-4
-# wandb.config.lr_init_value = 3e-4 # when using exponential_decay
-# wandb.config.lr_transition_steps = 100_000
-# wandb.config.lr_decay_rate = 0.3
-# wandb.config.lr_staircase = True
+wandb.config.lr = 1e-4
 wandb.config.grad_norm_clip = 10.0
 
 wandb.config.model_key = MODEL_KEY
 wandb.config.data_key = DATA_KEY
 wandb.config.test_key = TEST_KEY
 wandb.config.logging_key = LOGGING_KEY
-wandb.config.log_every = 5_000
+wandb.config.log_every = 10_000
 
 
 # %%
@@ -201,7 +204,7 @@ opt_state = device_put_replicated(opt_state, devices)
 
 pbar = tqdm(
     zip(
-        range(wandb.config.n_tpu_steps),
+        range(1, wandb.config.n_tpu_steps + 1),
         mnist.indicies_tpu_iterator(n_tpus, wandb.config.batch_size_per_tpu, data.shape[1], wandb.config.n_tpu_steps, DATA_KEY, wandb.config.l),
         train_keys,
         test_keys,
@@ -237,6 +240,7 @@ for i, idx, train_key, test_key in pbar:
     )
 
     if n_gradient_steps % wandb.config.log_every == 0:
+        model = eqx.combine(tree_map(partial(np.mean, axis=0), params), static)
         save_model(model, n_gradient_steps)
         wandb.log(
             {
@@ -249,17 +253,6 @@ for i, idx, train_key, test_key in pbar:
             step=n_gradient_steps,
         )
 
-model = eqx.combine(tree_map(partial(np.mean, axis=0), params), static)
-
 
 # %%
-wandb.run.finish()
-
-
-# %%
-local_train_data, local_test_data = mnist.get_mnist()
-fig = local_test_data[29]
-plt.imshow(nn.sigmoid(model(fig, key=LOGGING_KEY)[0][0][0]), cmap='gray')
-plt.show()
-plt.imshow(np.pad(fig[0], ((2, 2), (2, 2))), cmap='gray')
-plt.show()
+wandb.finish()

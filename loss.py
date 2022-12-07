@@ -12,7 +12,7 @@ from jax.random import PRNGKeyArray
 from equinox import Module
 
 
-def iwelbo_loss(model: Module, x: Array, key: PRNGKeyArray, M: int = 1) -> float:
+def iwelbo_loss(model: Module, x: Array, key: PRNGKeyArray, M: int = 1, beta: int = 1) -> float:
 
     # Split the key to have one for each sample
     keys = split(key, x.shape[0])
@@ -40,7 +40,7 @@ def iwelbo_loss(model: Module, x: Array, key: PRNGKeyArray, M: int = 1) -> float
     like = reduce(likelihood.log_prob(xs), 'b m c h w -> b m', 'sum')
 
     # Importance weights
-    iw_loss = reduce(like - kl_div, 'b m -> b', logsumexp) - np.log(M)
+    iw_loss = reduce(like - beta * kl_div, 'b m -> b', logsumexp) - np.log(M)
 
     # Mean over the batch
     return -np.mean(iw_loss)
