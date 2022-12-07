@@ -160,7 +160,7 @@ model = DoublingVNCA(key=MODEL_KEY)
 
 n_tpus = local_device_count()
 devices = local_devices()
-data, test_data = mnist.load_mnist_on_tpu(devices=local_devices())
+data, test_data = mnist.load_mnist_on_tpu(devices=local_devices(), key=TEST_KEY)
 n_tpus, devices
 
 
