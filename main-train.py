@@ -46,7 +46,7 @@ from optax import adam, clip_by_global_norm, chain
 
 from data import binarized_mnist
 from loss import iwelbo_loss
-from models import AutoEncoder, BaselineVAE, DoublingVNCA, NonDoublingVNCA
+from models import AutoEncoder, BaselineVAE, DoublingVNCA, NonDoublingVNCA, sample_gaussian
 from log_utils import save_model, restore_model, to_img, log_center, log_samples, log_reconstructions, log_growth_stages, log_nca_stages
 
 # typing
@@ -75,6 +75,61 @@ def make_step(data: Array, index: Array, params, static, key: PRNGKeyArray, opt_
         loss, grads = eqx.filter_value_and_grad(iwelbo_loss)(model, x, subkey)
         loss = lax.pmean(loss, axis_name='num_devices')
         grads = lax.pmean(grads, axis_name='num_devices')
+
+        updates, opt_state = optim.update(grads, opt_state)
+        params = eqx.apply_updates(params, updates)
+        return (params, opt_state, key), loss
+
+    (params, opt_state, key), loss = lax.scan(step, (params, opt_state, key), index)
+    return loss, params, opt_state
+
+
+def damage_half(x: Array, *, key: PRNGKeyArray) -> Array:
+    '''Set half of the image to 0.0'''
+    _, h, w = x.shape
+    h_half, w_half = h // 2, w // 2
+    hmask, wmask = randint(
+        key = key, 
+        shape = (2,), 
+        minval = np.zeros(2, dtype=np.int32), 
+        maxval = np.array([h_half, w_half], dtype=np.int32)
+    )
+    return x.at[:, hmask:hmask + h_half, wmask:wmask + h_half].set(0.0)
+
+
+@partial(pmap, axis_name='num_devices', static_broadcasted_argnums=(3, 6), out_axes=(None, 0, 0))
+def make_pool_step(data: Array, index: Array, params, static, key: PRNGKeyArray, opt_state: tuple, optim: GradientTransformation, pool: list) -> Tuple[float, Module, Any]:
+    batch_size = len(index)
+    n_pool_samples = batch_size // 2
+
+    def step(carry, index):
+        params, opt_state, key = carry
+        model = eqx.combine(params, static)
+
+        x = data[index]
+        key, subkey, *damage_keys = split(key, batch_size + 2)
+
+        z_pool = None
+        if len(pool) > n_pool_samples:
+            x_pool, z_pool = pool[:n_pool_samples]  
+            x = x.at[n_pool_samples:].set(x_pool)  # (batch_size, c, h, w)
+            z_pool = vmap(damage_half)(z_pool, key=damage_keys)  # (batch_size, z_dim, h, w)
+        
+        # --- All this into a function ---
+        mean, logvar = model.encoder(x)
+        z_0 = sample_gaussian(mean, logvar, subkey)  # (batch_size, z_dim)
+
+        if z_pool is not None:
+            z_0 = z_0.at[n_pool_samples:].set(z_pool)
+
+        z_T = model.decoder(z_0)
+        
+        loss, grads = eqx.filter_value_and_grad(iwelbo_loss)(z_T, mean, logvar)
+        loss = lax.pmean(loss, axis_name='num_devices')
+        grads = lax.pmean(grads, axis_name='num_devices')
+
+        pool.append((x, z_T))
+        # ^^^ All this into a function ^^^
 
         updates, opt_state = optim.update(grads, opt_state)
         params = eqx.apply_updates(params, updates)
