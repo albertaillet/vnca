@@ -1,7 +1,7 @@
 # %%
 from IPython import get_ipython
 
-get_ipython().system('git clone https://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@github.com/albertaillet/vnca.git -b log-outputs')
+get_ipython().system('git clone https://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@github.com/albertaillet/vnca.git')
 get_ipython().run_line_magic('cd', '/kaggle/working/vnca')
 
 
@@ -192,6 +192,7 @@ for i, idx, train_key, test_key in pbar:
                 'nca_stages': to_img(log_nca_stages(model, key=LOGGING_KEY)) if isinstance(model, NonDoublingVNCA) else None,
             },
             step=n_gradient_steps,
+            commit=True,
         )
 
 
