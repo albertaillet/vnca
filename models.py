@@ -249,7 +249,7 @@ class DoublingVNCA(AutoEncoder):
         for _ in range(self.K):
             z = self.double(z)
             stages_probs.append(process(z))
-            for i in range(self.N_nca_steps):
+            for _ in range(self.N_nca_steps):
                 z = z + self.step(z)
                 stages_probs.append(process(z))
 
