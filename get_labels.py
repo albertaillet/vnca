@@ -4,7 +4,7 @@ from jax import numpy as np
 from distrax import Bernoulli
 from functools import partial
 
-from data.mnist import get_mnist
+from data import binarized_mnist
 from keras.datasets import mnist
 
 # typing
@@ -14,7 +14,7 @@ from typing import Tuple, Any
 
 # %%
 # Load the binarized MNIST data
-train_data_binarized, test_data_binarized = get_mnist(pad=0)
+train_data_binarized, test_data_binarized = binarized_mnist.get_data(pad=0)
 train_data_binarized = train_data_binarized.squeeze()
 test_data_binarized = test_data_binarized.squeeze()
 
