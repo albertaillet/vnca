@@ -40,8 +40,9 @@ import matplotlib.pyplot as plt
 import equinox as eqx
 import jax.numpy as np
 from jax.random import PRNGKey, split, permutation, randint
-from jax import lax, nn
-from jax import jit, pmap, local_device_count, local_devices, device_put_replicated, tree_map, vmap
+from jax import lax
+from jax.nn import sigmoid
+from jax import pmap, local_device_count, local_devices, device_put_replicated, tree_map, vmap
 from einops import rearrange
 from optax import adam, clip_by_global_norm, chain
 
@@ -119,13 +120,14 @@ def to_grid(x: Array, ih: int, iw: int) -> Array:
 
 @eqx.filter_jit
 def log_center(model: AutoEncoder) -> Array:
-    return model.center()
+    return sigmoid(model.center())
 
 
 @eqx.filter_jit
 def log_samples(model: AutoEncoder, ih: int = 4, iw: int = 8, *, key: PRNGKeyArray) -> Array:
     keys = split(key, ih * iw)
     samples = vmap(model.sample)(key=keys)
+    samples = sigmoid(samples)
     return to_grid(samples, ih=ih, iw=iw)
 
 
@@ -135,6 +137,7 @@ def log_reconstructions(model: AutoEncoder, data: Array, ih: int = 4, iw: int = 
     keys = split(key, ih * iw)
     reconstructions, _, _ = vmap(model)(x, key=keys)
     reconstructions = rearrange(reconstructions, 'n m c h w -> (n m) c h w')
+    reconstructions = sigmoid(reconstructions)
     return to_grid(reconstructions, ih=ih, iw=iw)
 
 
