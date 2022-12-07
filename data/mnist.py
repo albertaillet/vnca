@@ -34,7 +34,7 @@ def download_mnist(dir: Path) -> None:
         print(f'Downloaded {s} to {npz_path}')
 
 
-def get_mnist() -> Tuple[Array, Array]:
+def get_mnist(pad: int = 2) -> Tuple[Array, Array]:
     '''Get binarized MNIST dataset.'''
 
     if not ROOT.exists():
@@ -45,9 +45,9 @@ def get_mnist() -> Tuple[Array, Array]:
     test_data = load(ROOT / 'test.npy')
 
     train_data = np.concatenate([train_data, val_data], axis=0)
-    
-    test_data = np.pad(test_data, ((0, 0), (0, 0), (2, 2), (2, 2)), mode='constant', constant_values=0)
-    train_data = np.pad(train_data, ((0, 0), (0, 0), (2, 2), (2, 2)), mode='constant', constant_values=0)
+
+    test_data = np.pad(test_data, ((0, 0), (0, 0), (pad, pad), (pad, pad)), mode='constant', constant_values=0)
+    train_data = np.pad(train_data, ((0, 0), (0, 0), (pad, pad), (pad, pad)), mode='constant', constant_values=0)
 
     return train_data, test_data
 
@@ -74,11 +74,13 @@ def load_mnist(batch_size: int, key: PRNGKeyArray) -> Tuple[Iterator, Iterator]:
     return dataset_iterator(train_dataset, batch_size, key), dataset_iterator(test_dataset, batch_size, key)
 
 
-def load_mnist_on_tpu(devices: list) -> Tuple[Array, Array]:
+def load_mnist_on_tpu(devices: list, *, key: PRNGKeyArray) -> Tuple[Array, Array]:
     '''Load binarized MNIST dataset to TPU.'''
     from jax import device_put_replicated, device_put_sharded
 
     train_dataset, test_dataset = get_mnist()
+
+    test_dataset = permutation(key, test_dataset, axis=0)
 
     shard = [*rearrange(test_dataset, '(t s) c h w -> t s c h w', t=len(devices))]
 
