@@ -155,6 +155,8 @@ class NCAStep(Sequential):
 
 
 class AutoEncoder(Module):
+    latent_size: int
+
     def __call__(self, x: Array, *, key: PRNGKeyArray, M: int = 1) -> Tuple[Array, Array, Array]:
         # get parameters for the latent distribution
         mean, logvar = self.encoder(x)
@@ -231,7 +233,7 @@ class DoublingVNCA(AutoEncoder):
         mean = np.zeros(self.latent_size)
         logvar = np.zeros(self.latent_size)
         z = sample_gaussian(mean, logvar, (self.latent_size,), key=key)
-        
+
         # Add height and width dimensions
         z = rearrange(z, 'c -> c 1 1')
 
@@ -281,15 +283,15 @@ class NonDoublingVNCA(AutoEncoder):
         logvar = np.zeros(self.latent_size)
         z = sample_gaussian(mean, logvar, (self.latent_size,), key=key)
         z = repeat(z, 'c -> c h w', h=32, w=32)
- 
+
         def process(z: Array) -> Array:
             '''Process a latent sample by taking the image channels, applying sigmoid.'''
             return sigmoid(z[:n_channels])
- 
+
         # Decode the latent sample and save the processed image channels
         stages_probs = []
         for _ in range(self.N_nca_steps):
             z = z + self.step(z)
             stages_probs.append(process(z))
- 
+
         return np.array(stages_probs)
