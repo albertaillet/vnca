@@ -276,7 +276,7 @@ class NonDoublingVNCA(AutoEncoder):
 
         # Apply the NCA steps
         scan_fn = jit(lambda z, _: (lax.add(z, self.step(z)), None))
-        z, _ = lax.scan(scan_fn, z, None, length=self.N_nca_steps)
+        z, _ = lax.scan(scan_fn, z, None, length=self.N_nca_steps, unroll=12)
         # for _ in range(self.N_nca_steps):
         #    z = z + self.step(z)
 
