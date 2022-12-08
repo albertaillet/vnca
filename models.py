@@ -1,4 +1,4 @@
-from jax import vmap, jit
+from jax import vmap, checkpoint
 import jax.numpy as np
 from jax.random import split, normal, bernoulli
 from jax.nn import elu, sigmoid
@@ -275,10 +275,11 @@ class NonDoublingVNCA(AutoEncoder):
         z = repeat(z, 'c -> c h w', h=32, w=32)
 
         # Apply the NCA steps
-        scan_fn = jit(lambda z, _: (lax.add(z, self.step(z)), None))
-        z, _ = lax.scan(scan_fn, z, None, length=self.N_nca_steps, unroll=12)
-        # for _ in range(self.N_nca_steps):
-        #    z = z + self.step(z)
+        @checkpoint
+        def scan_fn(z, _):
+            return (lax.add(z, self.step(z)), None)
+
+        z, _ = lax.scan(scan_fn, z, None, length=self.N_nca_steps)
 
         return z
 
