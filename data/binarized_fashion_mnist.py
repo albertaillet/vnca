@@ -33,7 +33,7 @@ def get_data(pad: int = 2) -> Tuple[Array, Array]:
     test_data = rearrange(test_data, '(n c) h w -> n c h w', n=10_000, c=1, h=32, w=32)
 
     # Binarize the images using bernoulli sampling
-    train_data = bernoulli(BINARIZATION_KEY, train_data, dtype=np.float32)
-    test_data = bernoulli(BINARIZATION_KEY, test_data, dtype=np.float32)
+    train_data = bernoulli(BINARIZATION_KEY, p=train_data).astype(np.float32)
+    test_data = bernoulli(BINARIZATION_KEY, p=test_data).astype(np.float32)
 
     return train_data, test_data
