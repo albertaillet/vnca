@@ -273,6 +273,10 @@ class NonDoublingVNCA(AutoEncoder):
         # repeat the latent sample over the image dimensions
         z = repeat(z, 'c -> c h w', h=32, w=32)
 
+        # decode the latent sample by applying the NCA steps
+        return self.decode_grid(z)
+
+    def decode_grid(self, z: Array) -> Array:
         # Apply the NCA steps
         for _ in range(self.N_nca_steps):
             z = z + self.step(z)
