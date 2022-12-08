@@ -39,12 +39,11 @@ import equinox as eqx
 import jax.numpy as np
 from jax.random import PRNGKey, split, randint
 from jax import lax
-from jax.nn import sigmoid
 from jax import pmap, local_device_count, local_devices, device_put_replicated, tree_map, vmap
 from einops import rearrange
 from optax import adam, clip_by_global_norm, chain
 
-from data import load_data_on_tpu
+from data import load_data_on_tpu, indicies_tpu_iterator
 from loss import iwelbo_loss
 from models import AutoEncoder, BaselineVAE, DoublingVNCA, NonDoublingVNCA
 from log_utils import save_model, restore_model, to_img, log_center, log_samples, log_reconstructions, log_growth_stages, log_nca_stages
@@ -146,7 +145,7 @@ opt_state = device_put_replicated(opt_state, devices)
 pbar = tqdm(
     zip(
         range(1, wandb.config.n_tpu_steps + 1),
-        binarized_mnist.indicies_tpu_iterator(n_tpus, wandb.config.batch_size_per_tpu, data.shape[1], wandb.config.n_tpu_steps, DATA_KEY, wandb.config.l),
+        indicies_tpu_iterator(n_tpus, wandb.config.batch_size_per_tpu, data.shape[1], wandb.config.n_tpu_steps, DATA_KEY, wandb.config.l),
         train_keys,
         test_keys,
     ),
