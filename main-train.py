@@ -6,7 +6,7 @@ get_ipython().run_line_magic('cd', '/kaggle/working/vnca')
 
 
 # %%
-get_ipython().run_cell_magic('capture', '', '%pip install --upgrade jax tensorflow_probability tensorflow jaxlib numpy equinox einops optax distrax wandb')
+get_ipython().run_cell_magic('capture', '', '%pip install --upgrade jax tensorflow_probability tensorflow jaxlib numpy equinox einops optax distrax wandb datasets')
 
 
 # %%
@@ -44,7 +44,7 @@ from jax import pmap, local_device_count, local_devices, device_put_replicated, 
 from einops import rearrange
 from optax import adam, clip_by_global_norm, chain
 
-from data import binarized_mnist
+from data import load_data_on_tpu
 from loss import iwelbo_loss
 from models import AutoEncoder, BaselineVAE, DoublingVNCA, NonDoublingVNCA
 from log_utils import save_model, restore_model, to_img, log_center, log_samples, log_reconstructions, log_growth_stages, log_nca_stages
@@ -98,7 +98,7 @@ model = DoublingVNCA(key=MODEL_KEY)
 
 n_tpus = local_device_count()
 devices = local_devices()
-data, test_data = binarized_mnist.load_data_on_tpu(devices=local_devices(), key=TEST_KEY)
+data, test_data = load_data_on_tpu(devices=local_devices(), dataset='binarized_mnist', key=TEST_KEY)
 n_tpus, devices
 
 
