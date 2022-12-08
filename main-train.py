@@ -1,12 +1,15 @@
 # %%
 from IPython import get_ipython
 
-get_ipython().system('git clone https://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@github.com/albertaillet/vnca.git')
-get_ipython().run_line_magic('cd', '/kaggle/working/vnca')
+get_ipython().system('git clone https://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@github.com/albertaillet/vnca.git -b training-pool-nondoubling')
 
 
 # %%
 get_ipython().run_cell_magic('capture', '', '%pip install --upgrade jax tensorflow_probability tensorflow jaxlib numpy equinox einops optax distrax wandb')
+
+
+# %%
+get_ipython().run_line_magic('cd', '/kaggle/working/vnca')
 
 
 # %%
@@ -179,7 +182,7 @@ def test_iwelbo(x: Array, params, static, key: PRNGKeyArray, M: int, batch_size:
 
 
 # %%
-model = DoublingVNCA(key=MODEL_KEY, latent_size=2)
+model = NonDoublingVNCA(key=MODEL_KEY, latent_size=2)
 
 n_tpus = local_device_count()
 devices = local_devices()
@@ -212,7 +215,7 @@ wandb.config.test_key = TEST_KEY
 wandb.config.logging_key = LOGGING_KEY
 wandb.config.log_every = 10_000
 
-wandb.config.pool_size = 1024 if isinstance(model, DoublingVNCA) else None
+wandb.config.pool_size = 1024 if isinstance(model, NonDoublingVNCA) else None
 
 
 # %%
@@ -237,6 +240,7 @@ if wandb.config.pool_size is not None:
 
     pool = device_put_replicated(pool, devices)
 
+
 # %%
 pbar = tqdm(
     zip(
@@ -250,7 +254,7 @@ pbar = tqdm(
 
 for i, idx, train_key, test_key in pbar:
     step_time = time.time()
-    loss, params, opt_state = make_step(data, idx, params, static, train_key, opt_state, opt)
+    loss, params, opt_state = make_pool_step(data, idx, params, static, train_key, opt_state, opt, pool)
     step_time = time.time() - step_time
 
     n_gradient_steps = i * wandb.config.l
@@ -293,3 +297,4 @@ for i, idx, train_key, test_key in pbar:
 
 # %%
 wandb.finish()
+
