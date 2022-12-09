@@ -13,15 +13,19 @@ from jax import Array
 from typing import Iterator, Tuple
 
 
-def get_data(dataset: str = 'binarized_mnist', pad: int = 2) -> Tuple[Array, Array]:
+def get_data(dataset: str = 'binarized_mnist', *args, **kwargs) -> Tuple[Array, Array]:
     if dataset == 'binarized_mnist':
         import data.binarized_mnist as binarized_mnist
 
-        return binarized_mnist.get_data(pad)
-    elif dataset == 'binarized_fashion_mnist':
-        import data.binarized_fashion_mnist as binarized_fashion_mnist
+        return binarized_mnist.get_data(*args, **kwargs)
+    elif dataset == 'fashion_mnist':
+        import data.fashion_mnist as fashion_mnist
 
-        return binarized_fashion_mnist.get_data(pad)
+        return fashion_mnist.get_data(binarized=False, *args, **kwargs)
+    elif dataset == 'binarized_fashion_mnist':
+        import data.fashion_mnist as fashion_mnist
+
+        return fashion_mnist.get_data(binarized=True, *args, **kwargs)
     else:
         raise ValueError(f'Unknown dataset {dataset}')
 
@@ -31,7 +35,7 @@ def get_indices(n: int, batch_size: int, key: PRNGKeyArray) -> Array:
     indices = np.arange(n)  # [0, 1, 2, ..., len(dataset)]
     indices = permutation(key, indices)  # shuffle the indices
     indices = indices[: (n // batch_size) * batch_size]  # drop the last few samples not in a batch
-    return indices  # reshape into (n_batches, batch_size)
+    return rearrange(indices, '(n b) -> n b', b=batch_size)  # reshape into (n_batches, batch_size)
 
 
 def load_data(batch_size: int, dataset: str = 'binarized_mnist', *, key: PRNGKeyArray) -> Tuple[Iterator, Iterator]:

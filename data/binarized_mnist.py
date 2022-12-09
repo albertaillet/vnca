@@ -8,13 +8,16 @@ from numpy import genfromtxt, save, load
 from jax import Array
 from typing import Tuple
 
-ROOT = Path('./data/raw/binarized_mnist')
+
+# Hugo Larochelle's Binary Static MNIST
 URL = 'http://www.cs.toronto.edu/~larocheh/public/datasets/binarized_mnist/'
 LINKS = {'train': 'binarized_mnist_train.amat', 'val': 'binarized_mnist_valid.amat', 'test': 'binarized_mnist_test.amat'}
+ROOT = Path('./data/raw/binarized_mnist')
 
 
 def download_data(dir: Path) -> None:
-    '''Download binarized MNIST dataset to directory.'''
+    '''Download Hugo Larochelle's Binary Static MNIST dataset to directory.'''
+    # Could also be done using https://twitter.com/alemi/status/1042658244609499137
 
     dir.mkdir(parents=True)
     for s, file in LINKS.items():
@@ -27,14 +30,14 @@ def download_data(dir: Path) -> None:
 
         npz_path = dir / s
         split_data = genfromtxt(amat_path, delimiter=' ')
-        split_data = rearrange(split_data, 'n (h w c) -> n c h w', h=28, w=28, c=1)
+        split_data = rearrange(split_data, 'n (h w c) -> n c h w', c=1, h=28, w=28)
         save(npz_path, split_data)
 
         print(f'Downloaded {s} to {npz_path}')
 
 
 def get_data(pad: int = 2) -> Tuple[Array, Array]:
-    '''Get binarized MNIST dataset.'''
+    '''Get Hugo Larochelle's Binary Static MNIST dataset.'''
 
     if not ROOT.exists():
         download_data(ROOT)

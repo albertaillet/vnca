@@ -13,11 +13,11 @@ from typing import Tuple
 BINARIZATION_KEY = PRNGKey(42)
 
 
-def get_data(pad: int = 2) -> Tuple[Array, Array]:
-    '''Get binarized FASHION-MNIST dataset.
+def get_data(binarized: bool, pad: int = 2) -> Tuple[Array, Array]:
+    '''Get FASHION-MNIST dataset or a binarized FASHION-MNIST dataset.
     The data is downloaded from HuggingFace datasets.
-    The dataset is padded with zeros and binarized 
-    using bernoulli sampling with a set seed of 42.'''
+    The dataset is padded with zeros. 
+    If binarized is True, the images are binarized using bernoulli sampling with a set seed of 42.'''
 
     dataset = load_dataset('fashion_mnist')
 
@@ -29,11 +29,12 @@ def get_data(pad: int = 2) -> Tuple[Array, Array]:
     test_data = np.pad(test_data, ((0, 0), (pad, pad), (pad, pad)), mode='constant', constant_values=0)
 
     # Reshape the images to (n, c, h, w)
-    train_data = rearrange(train_data, '(n c) h w -> n c h w', n=60_000, c=1, h=32, w=32)
-    test_data = rearrange(test_data, '(n c) h w -> n c h w', n=10_000, c=1, h=32, w=32)
+    train_data = rearrange(train_data, '(n c) h w -> n c h w', n=60_000, c=1, h=32, w=32).astype(np.float32)
+    test_data = rearrange(test_data, '(n c) h w -> n c h w', n=10_000, c=1, h=32, w=32).astype(np.float32)
 
-    # Binarize the images using bernoulli sampling
-    train_data = bernoulli(BINARIZATION_KEY, p=train_data.astype(np.float32)).astype(np.float32)
-    test_data = bernoulli(BINARIZATION_KEY, p=test_data.astype(np.float32)).astype(np.float32)
+    if binarized:
+        # Binarize the images using bernoulli sampling
+        train_data = bernoulli(BINARIZATION_KEY, p=train_data).astype(np.float32)
+        test_data = bernoulli(BINARIZATION_KEY, p=test_data).astype(np.float32)
 
     return train_data, test_data
