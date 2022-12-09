@@ -42,7 +42,7 @@ import equinox as eqx
 import jax.numpy as np
 from jax.random import PRNGKey, split, randint, permutation
 from jax import lax, jit
-from jax import pmap, local_device_count, local_devices, device_put_replicated, tree_map, vmap
+from jax import pmap, local_device_count, local_devices, device_put_replicated, device_put_sharded, tree_map, vmap
 from einops import rearrange, repeat
 from optax import adam, clip_by_global_norm, chain
 
@@ -66,7 +66,15 @@ LOGGING_KEY = PRNGKey(3)
 
 
 # %%
+model = NonDoublingVNCA(key=MODEL_KEY)
 
+n_tpus = local_device_count()
+devices = local_devices()
+data, test_data = load_data_on_tpu(devices=local_devices(), dataset='binarized_mnist', key=TEST_KEY)
+n_tpus, devices
+
+
+# %%
 @jit
 def damage_half(x: Array, *, key: PRNGKeyArray) -> Array:
     '''Set the cell states of a H//2 x W//2 square to zero.'''
@@ -84,18 +92,19 @@ def damage_half(x: Array, *, key: PRNGKeyArray) -> Array:
 
 @partial(pmap, axis_name='num_devices', static_broadcasted_argnums=(3, 6), out_axes=(None, 0, 0))
 def make_pool_step(
-    data: Array, index: Array, params, static, key: PRNGKeyArray, opt_state: tuple, optim: GradientTransformation, pool: Tuple[Array, Array]
+    data: Array, index: Array, params, static, key: PRNGKeyArray, opt_state: tuple, optim: GradientTransformation, t_key: PRNGKeyArray, pool: Tuple[Array, Array]
 ) -> Tuple[float, Module, Any]:
-    batch_size = len(index[0])
+    batch_size = index.shape[1]
     n_pool_samples = batch_size // 2
 
     def step(carry: Tuple, index: Array) -> Tuple:
-        params, opt_state, key = carry
+        params, opt_state, key, t_key = carry
         model: NonDoublingVNCA = eqx.combine(params, static)
 
         x = data[index]  # (batch_size, c, h, w)
-        key, subkey = split(key)
-        damage_keys = split(key, n_pool_samples)
+        next_key, fwd_key, permutation_key, subkey = split(key, 4)
+        t_key, next_t_key = split(t_key, 2)
+        damage_keys = split(subkey, n_pool_samples)
 
         x_pool, z_pool = pool  # (pool_size, c, h, w), (pool_size, z_dim, h, w)
         x_pool_samples = x_pool[:n_pool_samples]
@@ -105,14 +114,15 @@ def make_pool_step(
         z_pool_samples = vmap(damage_half)(z_pool_samples, key=damage_keys)  # (batch_size, z_dim, h, w)
 
         @partial(eqx.filter_value_and_grad, has_aux=True)
-        def forward(model: NonDoublingVNCA, x: Array, z_pool_samples: Array, *, key: PRNGKeyArray) -> Tuple[Array, Array]:
+        def forward(model: NonDoublingVNCA, x: Array, z_pool_samples: Array, *, key: PRNGKeyArray, t_key : PRNGKeyArray) -> Tuple[Array, Array]:
+
             mean, logvar = vmap(model.encoder, out_axes=1)(x)
-            z_0 = sample_gaussian(mean, logvar, mean.shape, key=subkey)  # (batch_size, z_dim)
+            z_0 = sample_gaussian(mean, logvar, mean.shape, key=sample_key)  # (batch_size, z_dim)
             z_0 = repeat(z_0, 'b c -> b c h w', h=32, w=32)
 
             z_0 = z_0.at[n_pool_samples:].set(z_pool_samples)  # (pool_size, z_dim, h, w)
-
-            z_T = vmap(model.decode_grid)(z_0)
+            
+            z_T = vmap(partial(model.decode_grid, key=t_key))(z_0)
 
             b, c, h, w = x.shape
             recon_x = vmap(partial(crop, shape=(c, h, w)))(z_T)
@@ -124,21 +134,21 @@ def make_pool_step(
 
             return loss, (x, z_T)
 
-        (loss, (x, z_T)), grads = forward(model, x, z_pool_samples, key=subkey)
+        (loss, (x, z_T)), grads = forward(model, x, z_pool_samples, key=fwd_key, t_key=t_key)
 
         z_pool = z_pool.at[:batch_size].set(z_T)
         x_pool = x_pool.at[:batch_size].set(x)
-        z_pool = permutation(key, z_pool, axis=0)
-        x_pool = permutation(key, x_pool, axis=0)
+        z_pool = permutation(permutation_key, z_pool, axis=0)
+        x_pool = permutation(permutation_key, x_pool, axis=0)
 
         loss = lax.pmean(loss, axis_name='num_devices')
         grads = lax.pmean(grads, axis_name='num_devices')
 
         updates, opt_state = optim.update(grads, opt_state)
         params = eqx.apply_updates(params, updates)
-        return (params, opt_state, key), loss
+        return (params, opt_state, next_key, next_t_key), loss
 
-    (params, opt_state, key), loss = lax.scan(step, (params, opt_state, key), index)
+    (params, opt_state, key, t_key), loss = lax.scan(step, (params, opt_state, key, t_key), index)
     return loss, params, opt_state
 
 
@@ -152,24 +162,19 @@ def test_iwelbo(x: Array, params, static, key: PRNGKeyArray, M: int, batch_size:
 
 
 # %%
-model = NonDoublingVNCA(key=MODEL_KEY, latent_size=2)
-
-n_tpus = local_device_count()
-devices = local_devices()
-data, test_data = load_data_on_tpu(devices=local_devices(), dataset='binarized_mnist', key=TEST_KEY)
-n_tpus, devices
-
-
-# %%
 wandb.init(project='vnca', entity='dladv-vnca', mode='online')
 
 wandb.config.model_type = model.__class__.__name__
 wandb.config.latent_size = model.latent_size
 wandb.config.batch_size = 32
-wandb.config.batch_size_per_tpu = wandb.config.batch_size // n_tpus
 wandb.config.n_gradient_steps = 100_000
-wandb.config.l = 250
+wandb.config.pool_size = 1024 if isinstance(model, NonDoublingVNCA) else None
+
+
+wandb.config.batch_size_per_tpu = wandb.config.batch_size // n_tpus
+wandb.config.l = 125
 wandb.config.n_tpu_steps = wandb.config.n_gradient_steps // wandb.config.l
+wandb.config.pool_size_per_tpu = (wandb.config.pool_size // n_tpus) if isinstance(model, NonDoublingVNCA) else None
 
 wandb.config.test_loss_batch_size = 8
 wandb.config.test_loss_latent_samples = 128
@@ -183,14 +188,15 @@ wandb.config.model_key = MODEL_KEY
 wandb.config.data_key = DATA_KEY
 wandb.config.test_key = TEST_KEY
 wandb.config.logging_key = LOGGING_KEY
-wandb.config.log_every = 10_000
-
-wandb.config.pool_size = 1024 if isinstance(model, NonDoublingVNCA) else None
+wandb.config.log_every = 2_000
 
 
 # %%
 train_keys = split(DATA_KEY, wandb.config.n_tpu_steps * n_tpus)
 train_keys = rearrange(train_keys, '(n t) k -> n t k', t=n_tpus, n=wandb.config.n_tpu_steps)
+
+t_keys = split(DATA_KEY, wandb.config.n_tpu_steps)
+t_keys = repeat(train_keys, 'n k -> n t k', t=n_tpus, n=wandb.config.n_tpu_steps)
 
 test_keys = split(TEST_KEY, wandb.config.n_tpu_steps * n_tpus)
 test_keys = rearrange(test_keys, '(n t) k -> n t k', t=n_tpus, n=wandb.config.n_tpu_steps)
@@ -203,12 +209,21 @@ opt_state = opt.init(params)
 params = device_put_replicated(params, devices)
 opt_state = device_put_replicated(opt_state, devices)
 
-if wandb.config.pool_size is not None:
-    x_pool = np.empty((wandb.config.pool_size, 1, 32, 32), dtype=np.float32)
-    z_pool = np.empty((wandb.config.pool_size, model.latent_size, 32, 32), dtype=np.float32)
-    pool = (x_pool, z_pool)
 
-    pool = device_put_replicated(pool, devices)
+# %%
+if wandb.config.pool_size is not None:
+    x_pool = data[0, : wandb.config.pool_size_per_tpu * n_tpus].copy()
+    mean, logvar = vmap(model.encoder, out_axes=1)(x_pool)
+    z_pool = sample_gaussian(mean, logvar, mean.shape, key=DATA_KEY)  # (batch_size, z_dim)
+    z_pool = repeat(z_pool, 'n c -> n c h w', h=32, w=32, n=wandb.config.pool_size_per_tpu * n_tpus)
+
+    # reshape to tpus
+    x_pool = rearrange(x_pool, '(t n) c h w -> t n c h w', n=wandb.config.pool_size_per_tpu, t=n_tpus, c=1, h=32, w=32)
+    z_pool = rearrange(z_pool, '(t n) c h w -> t n c h w', n=wandb.config.pool_size_per_tpu, t=n_tpus, c=wandb.config.latent_size, h=32, w=32)
+
+    x_pool = device_put_sharded([*x_pool], devices)
+    z_pool = device_put_sharded([*z_pool], devices)
+    pool = (x_pool, z_pool)
 
 
 # %%
@@ -218,13 +233,14 @@ pbar = tqdm(
         indicies_tpu_iterator(n_tpus, wandb.config.batch_size_per_tpu, data.shape[1], wandb.config.n_tpu_steps, DATA_KEY, wandb.config.l),
         train_keys,
         test_keys,
+        t_keys,
     ),
     total=wandb.config.n_tpu_steps,
 )
 
-for i, idx, train_key, test_key in pbar:
+for i, idx, train_key, test_key, t_key in pbar:
     step_time = time.time()
-    loss, params, opt_state = make_pool_step(data, idx, params, static, train_key, opt_state, opt, pool)
+    loss, params, opt_state = make_pool_step(data, idx, params, static, train_key, opt_state, opt, pool, t_key)
     step_time = time.time() - step_time
 
     n_gradient_steps = i * wandb.config.l
@@ -267,4 +283,3 @@ for i, idx, train_key, test_key in pbar:
 
 # %%
 wandb.finish()
-
