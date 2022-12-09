@@ -41,10 +41,9 @@ from functools import partial
 import equinox as eqx
 import jax.numpy as np
 from jax.random import PRNGKey, split, randint, permutation
-from jax import lax
-from jax.nn import sigmoid
+from jax import lax, jit
 from jax import pmap, local_device_count, local_devices, device_put_replicated, tree_map, vmap
-from einops import rearrange
+from einops import rearrange, repeat
 from optax import adam, clip_by_global_norm, chain
 
 from data import binarized_mnist
@@ -67,100 +66,71 @@ LOGGING_KEY = PRNGKey(3)
 
 
 # %%
-@partial(pmap, axis_name='num_devices', static_broadcasted_argnums=(3, 6), out_axes=(None, 0, 0))
-def make_step(data: Array, index: Array, params, static, key: PRNGKeyArray, opt_state: tuple, optim: GradientTransformation) -> Tuple[float, Module, Any]:
-    def step(carry, index):
-        params, opt_state, key = carry
-        x = data[index]
-        key, subkey = split(key)
 
-        model = eqx.combine(params, static)
-        loss, grads = eqx.filter_value_and_grad(forward)(model, x, subkey)
-        loss = lax.pmean(loss, axis_name='num_devices')
-        grads = lax.pmean(grads, axis_name='num_devices')
-
-        updates, opt_state = optim.update(grads, opt_state)
-        params = eqx.apply_updates(params, updates)
-        return (params, opt_state, key), loss
-
-    (params, opt_state, key), loss = lax.scan(step, (params, opt_state, key), index)
-    return loss, params, opt_state
-
-
+@jit
 def damage_half(x: Array, *, key: PRNGKeyArray) -> Array:
-    '''Set half of the image to 0.0'''
-    _, h, w = x.shape
+    '''Set the cell states of a H//2 x W//2 square to zero.'''
+    l, h, w = x.shape
     h_half, w_half = h // 2, w // 2
     hmask, wmask = randint(
-        key = key, 
-        shape = (2,), 
-        minval = np.zeros(2, dtype=np.int32), 
-        maxval = np.array([h_half, w_half], dtype=np.int32)
+        key=key,
+        shape=(2,),
+        minval=np.zeros(2, dtype=np.int32),
+        maxval=np.array([h_half, w_half], dtype=np.int32),
     )
-    return x.at[:, hmask:hmask + h_half, wmask:wmask + h_half].set(0.0)
+    update = np.zeros((l, h_half, w_half), dtype=np.float32)
+    return lax.dynamic_update_slice(x, update, (0, hmask, wmask))
 
 
 @partial(pmap, axis_name='num_devices', static_broadcasted_argnums=(3, 6), out_axes=(None, 0, 0))
-def make_pool_step(data: Array, index: Array, params, static, key: PRNGKeyArray, opt_state: tuple, optim: GradientTransformation, pool: Tuple[Array, Array]) -> Tuple[float, Module, Any]:
-    batch_size = len(index)
+def make_pool_step(
+    data: Array, index: Array, params, static, key: PRNGKeyArray, opt_state: tuple, optim: GradientTransformation, pool: Tuple[Array, Array]
+) -> Tuple[float, Module, Any]:
+    batch_size = len(index[0])
     n_pool_samples = batch_size // 2
 
-    def step(carry, index):
+    def step(carry: Tuple, index: Array) -> Tuple:
         params, opt_state, key = carry
         model: NonDoublingVNCA = eqx.combine(params, static)
 
         x = data[index]  # (batch_size, c, h, w)
-        key, subkey, *damage_keys = split(key, batch_size + 2)
+        key, subkey = split(key)
+        damage_keys = split(key, n_pool_samples)
 
-        if np.all(pool == 0.0):  # first step
-            x_pool, z_pool = pool  # (pool_size, c, h, w), (pool_size, z_dim, h, w)
-            x_pool_samples = x_pool[:n_pool_samples]
-            z_pool_samples = z_pool[:n_pool_samples]
-            
-            x = x.at[n_pool_samples:].set(x_pool_samples)  # (batch_size, c, h, w)
-            z_pool_samples = vmap(damage_half)(z_pool_samples, key=damage_keys)  # (batch_size, z_dim, h, w)
-        
+        x_pool, z_pool = pool  # (pool_size, c, h, w), (pool_size, z_dim, h, w)
+        x_pool_samples = x_pool[:n_pool_samples]
+        z_pool_samples = z_pool[:n_pool_samples]
+
+        x = x.at[n_pool_samples:].set(x_pool_samples)  # (batch_size, c, h, w)
+        z_pool_samples = vmap(damage_half)(z_pool_samples, key=damage_keys)  # (batch_size, z_dim, h, w)
+
         @partial(eqx.filter_value_and_grad, has_aux=True)
         def forward(model: NonDoublingVNCA, x: Array, z_pool_samples: Array, *, key: PRNGKeyArray) -> Tuple[Array, Array]:
-            mean, logvar = model.encoder(x)
-            z_0 = sample_gaussian(mean, logvar, subkey)  # (batch_size, z_dim)
-            z_0 = rearrange(z_0, 'b c -> b c h w', h=32, w=32)
+            mean, logvar = vmap(model.encoder, out_axes=1)(x)
+            z_0 = sample_gaussian(mean, logvar, mean.shape, key=subkey)  # (batch_size, z_dim)
+            z_0 = repeat(z_0, 'b c -> b c h w', h=32, w=32)
 
-            if np.all(pool == 0.0):  # first step
-                z_0 = z_0.at[n_pool_samples:].set(z_pool_samples)  # (pool_size, z_dim, h, w)
+            z_0 = z_0.at[n_pool_samples:].set(z_pool_samples)  # (pool_size, z_dim, h, w)
 
-            z_T = model.decode_grid(z_0)
+            z_T = vmap(model.decode_grid)(z_0)
 
             b, c, h, w = x.shape
             recon_x = vmap(partial(crop, shape=(c, h, w)))(z_T)
-            
-            # add M diminersion to x and recon_x
-            x_M = rearrange(x, 'b c h w -> b m c h w', m=1)
-            recon_x_M = rearrange(recon_x, 'b c h w -> b m c h w', m=1)
 
-            loss = iwelbo_loss(recon_x_M, x_M, z_T, mean, logvar, key, M=1)
+            # add M diminersion to recon_x
+            recon_x_M = repeat(recon_x, 'b c h w -> b m c h w', m=1)
+
+            loss = iwelbo_loss(recon_x_M, x, mean, logvar, M=1)
 
             return loss, (x, z_T)
 
-        loss, grads, (x, z_T) = forward(model, x, z_pool_samples, key=subkey)
-        
-        # permuation of non-zero parts of pool
-        zero_pool = (z_pool == 0.0).all(axis=(1, 2, 3))
-        if np.all(zero_pool == False):
-            i = np.argmax(zero_pool)
-            # permute the already filled pool
-            z_pool = z_pool.at[:i].set(permutation(pool[:i], key=key, axis=0))
-            x_pool = x_pool.at[:i].set(permutation(pool[:i], key=key, axis=0))
-            
-            # fill the pool with the new samples
-            z_pool = z_pool.at[i:batch_size].set(z_T)
-            x_pool = x_pool.at[i:batch_size].set(x)
-        else:
-            z_pool = z_pool.at[:batch_size].set(z_T)
-            x_pool = x_pool.at[:batch_size].set(x)
-            z_pool = permutation(z_pool, key=key, axis=0)
-            x_pool = permutation(x_pool, key=key, axis=0)
-        
+        (loss, (x, z_T)), grads = forward(model, x, z_pool_samples, key=subkey)
+
+        z_pool = z_pool.at[:batch_size].set(z_T)
+        x_pool = x_pool.at[:batch_size].set(x)
+        z_pool = permutation(key, z_pool, axis=0)
+        x_pool = permutation(key, x_pool, axis=0)
+
         loss = lax.pmean(loss, axis_name='num_devices')
         grads = lax.pmean(grads, axis_name='num_devices')
 
@@ -191,7 +161,7 @@ n_tpus, devices
 
 
 # %%
-wandb.init(project='vnca', entity='dladv-vnca', mode='offline')
+wandb.init(project='vnca', entity='dladv-vnca', mode='online')
 
 wandb.config.model_type = model.__class__.__name__
 wandb.config.latent_size = model.latent_size
