@@ -1,7 +1,8 @@
-from jax import vmap
+from jax import vmap, checkpoint
 import jax.numpy as np
 from jax.random import split, normal, bernoulli
 from jax.nn import elu, sigmoid
+from jax import lax
 
 from einops import rearrange, repeat
 
@@ -278,8 +279,12 @@ class NonDoublingVNCA(AutoEncoder):
 
     def decode_grid(self, z: Array) -> Array:
         # Apply the NCA steps
-        for _ in range(self.N_nca_steps):
-            z = z + self.step(z)
+        @checkpoint
+        def scan_fn(z, _):
+            return (lax.add(z, self.step(z)), None)
+
+        z, _ = lax.scan(scan_fn, z, None, length=self.N_nca_steps)
+
         return z
 
     def nca_stages(self, n_channels: int = 1, *, key: PRNGKeyArray) -> Array:
