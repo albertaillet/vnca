@@ -48,7 +48,7 @@ from optax import adam, clip_by_global_norm, chain
 
 from data import load_data_on_tpu, indicies_tpu_iterator
 from loss import forward, iwelbo_loss
-from models import AutoEncoder, BaselineVAE, DoublingVNCA, NonDoublingVNCA, sample_gaussian, crop
+from models import AutoEncoder, BaselineVAE, DoublingVNCA, NonDoublingVNCA, sample_gaussian, crop, damage
 from log_utils import save_model, restore_model, to_img, log_center, log_samples, log_reconstructions, log_growth_stages, log_nca_stages
 
 # typing
@@ -75,21 +75,6 @@ n_tpus, devices
 
 
 # %%
-@jit
-def damage_half(x: Array, *, key: PRNGKeyArray) -> Array:
-    '''Set the cell states of a H//2 x W//2 square to zero.'''
-    l, h, w = x.shape
-    h_half, w_half = h // 2, w // 2
-    hmask, wmask = randint(
-        key=key,
-        shape=(2,),
-        minval=np.zeros(2, dtype=np.int32),
-        maxval=np.array([h_half, w_half], dtype=np.int32),
-    )
-    update = np.zeros((l, h_half, w_half), dtype=np.float32)
-    return lax.dynamic_update_slice(x, update, (0, hmask, wmask))
-
-
 @partial(pmap, axis_name='num_devices', static_broadcasted_argnums=(3, 6), out_axes=(None, 0, 0))
 def make_pool_step(
     data: Array, index: Array, params, static, key: PRNGKeyArray, opt_state: tuple, optim: GradientTransformation, t_key: PRNGKeyArray, pool: Tuple[Array, Array]
@@ -112,7 +97,7 @@ def make_pool_step(
 
         damage_keys = split(subkey, n_half_pool_samples)
         x = x.at[n_pool_samples:].set(x_pool_samples)  # (batch_size, c, h, w)
-        damaged_half = vmap(damage_half)(z_pool_samples[:n_half_pool_samples], key=damage_keys)  # (batch_size, z_dim, h, w)
+        damaged_half = vmap(damage)(z_pool_samples[:n_half_pool_samples], key=damage_keys)  # (batch_size, z_dim, h, w)
         z_pool_samples = z_pool_samples.at[:n_half_pool_samples].set(damaged_half)
 
         @partial(eqx.filter_value_and_grad, has_aux=True)

@@ -45,6 +45,20 @@ def flatten(x: Array) -> Array:
     return rearrange(x, 'c h w -> (c h w)')
 
 
+def damage_half(x: Array, *, key: PRNGKeyArray) -> Array:
+    '''Set the cell states of a H//2 x W//2 square to zero.'''
+    l, h, w = x.shape
+    h_half, w_half = h // 2, w // 2
+    hmask, wmask = randint(
+        key=key,
+        shape=(2,),
+        minval=np.zeros(2, dtype=np.int32),
+        maxval=np.array([h_half, w_half], dtype=np.int32),
+    )
+    update = np.zeros((l, h_half, w_half), dtype=np.float32)
+    return lax.dynamic_update_slice(x, update, (0, hmask, wmask))
+
+
 Flatten: Lambda = Lambda(flatten)
 
 
@@ -312,7 +326,7 @@ class NonDoublingVNCA(AutoEncoder):
 
         return z
 
-    def nca_stages(self, n_channels: int = 1, *, key: PRNGKeyArray) -> Array:
+    def nca_stages(self, n_channels: int = 1, T: int = 36, damage: set = set(), *, key: PRNGKeyArray) -> Array:
         mean = np.zeros(self.latent_size)
         logvar = np.zeros(self.latent_size)
         z = sample_gaussian(mean, logvar, (self.latent_size,), key=key)
@@ -324,8 +338,11 @@ class NonDoublingVNCA(AutoEncoder):
 
         # Decode the latent sample and save the processed image channels
         stages_probs = []
-        for _ in range(self.N_nca_steps):
+        for i in range(T):
             z = z + self.step(z)
+            if i in damage:
+                key, damage_key = split(key)
+                z = damage(z, key=damage_key)
             stages_probs.append(process(z))
 
         return np.array(stages_probs)

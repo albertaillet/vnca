@@ -68,8 +68,6 @@ def log_growth_stages(model: DoublingVNCA, *, key: PRNGKeyArray) -> Array:
 
 
 @eqx.filter_jit
-def log_nca_stages(model: NonDoublingVNCA, ih: int = 4, *, key: PRNGKeyArray) -> Array:
-    stages = model.nca_stages(key=key)
-    assert model.N_nca_steps % ih == 0, 'ih must be divide by N_nca_steps'
-    iw = model.N_nca_steps // ih
+def log_nca_stages(model: NonDoublingVNCA, ih: int = 4, iw: int = 9, *, key: PRNGKeyArray) -> Array:
+    stages = model.nca_stages(T=ih * iw, key=key)
     return to_grid(stages, ih=ih, iw=iw)
