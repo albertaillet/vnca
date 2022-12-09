@@ -96,6 +96,7 @@ def make_pool_step(
 ) -> Tuple[float, Module, Any]:
     batch_size = index.shape[1]
     n_pool_samples = batch_size // 2
+    n_half_pool_samples = n_pool_samples // 2
 
     def step(carry: Tuple, index: Array) -> Tuple:
         params, opt_state, key, t_key = carry
@@ -104,24 +105,25 @@ def make_pool_step(
         x = data[index]  # (batch_size, c, h, w)
         next_key, fwd_key, permutation_key, subkey = split(key, 4)
         t_key, next_t_key = split(t_key, 2)
-        damage_keys = split(subkey, n_pool_samples)
 
         x_pool, z_pool = pool  # (pool_size, c, h, w), (pool_size, z_dim, h, w)
         x_pool_samples = x_pool[:n_pool_samples]
         z_pool_samples = z_pool[:n_pool_samples]
 
+        damage_keys = split(subkey, n_half_pool_samples)
         x = x.at[n_pool_samples:].set(x_pool_samples)  # (batch_size, c, h, w)
-        z_pool_samples = vmap(damage_half)(z_pool_samples, key=damage_keys)  # (batch_size, z_dim, h, w)
+        damaged_half = vmap(damage_half)(z_pool_samples[:n_half_pool_samples], key=damage_keys)  # (batch_size, z_dim, h, w)
+        z_pool_samples = z_pool_samples.at[:n_half_pool_samples].set(damaged_half)
 
         @partial(eqx.filter_value_and_grad, has_aux=True)
-        def forward(model: NonDoublingVNCA, x: Array, z_pool_samples: Array, *, key: PRNGKeyArray, t_key : PRNGKeyArray) -> Tuple[Array, Array]:
+        def forward(model: NonDoublingVNCA, x: Array, z_pool_samples: Array, *, key: PRNGKeyArray, t_key: PRNGKeyArray) -> Tuple[Array, Array]:
 
             mean, logvar = vmap(model.encoder, out_axes=1)(x)
             z_0 = sample_gaussian(mean, logvar, mean.shape, key=key)  # (batch_size, z_dim)
             z_0 = repeat(z_0, 'b c -> b c h w', h=32, w=32)
 
             z_0 = z_0.at[n_pool_samples:].set(z_pool_samples)  # (pool_size, z_dim, h, w)
-            
+
             z_T = vmap(partial(model.decode_grid_random, key=t_key))(z_0)
 
             b, c, h, w = x.shape
