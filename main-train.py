@@ -117,12 +117,12 @@ def make_pool_step(
         def forward(model: NonDoublingVNCA, x: Array, z_pool_samples: Array, *, key: PRNGKeyArray, t_key : PRNGKeyArray) -> Tuple[Array, Array]:
 
             mean, logvar = vmap(model.encoder, out_axes=1)(x)
-            z_0 = sample_gaussian(mean, logvar, mean.shape, key=sample_key)  # (batch_size, z_dim)
+            z_0 = sample_gaussian(mean, logvar, mean.shape, key=key)  # (batch_size, z_dim)
             z_0 = repeat(z_0, 'b c -> b c h w', h=32, w=32)
 
             z_0 = z_0.at[n_pool_samples:].set(z_pool_samples)  # (pool_size, z_dim, h, w)
             
-            z_T = vmap(partial(model.decode_grid, key=t_key))(z_0)
+            z_T = vmap(partial(model.decode_grid_random, key=t_key))(z_0)
 
             b, c, h, w = x.shape
             recon_x = vmap(partial(crop, shape=(c, h, w)))(z_T)

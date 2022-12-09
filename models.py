@@ -277,7 +277,7 @@ class NonDoublingVNCA(AutoEncoder):
     N_nca_steps_min: int
     N_nca_steps_max: int
 
-    def __init__(self, latent_size: int = 256, N_nca_steps: int = 32, N_nca_steps_min: int = 32, N_nca_steps_max: int = 64, *, key: PRNGKeyArray) -> None:
+    def __init__(self, latent_size: int = 256, N_nca_steps: int = 36, N_nca_steps_min: int = 32, N_nca_steps_max: int = 64, *, key: PRNGKeyArray) -> None:
         key1, key2 = split(key)
         self.encoder = Encoder(latent_size=latent_size, key=key1)
         self.step = NCAStepSimple(latent_size=latent_size, key=key2)
@@ -324,7 +324,7 @@ class NonDoublingVNCA(AutoEncoder):
 
         # Decode the latent sample and save the processed image channels
         stages_probs = []
-        for _ in range(self.N_nca_steps_max):
+        for _ in range(self.N_nca_steps):
             z = z + self.step(z)
             stages_probs.append(process(z))
 
