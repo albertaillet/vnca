@@ -35,7 +35,7 @@ def get_indices(n: int, batch_size: int, key: PRNGKeyArray) -> Array:
     indices = np.arange(n)  # [0, 1, 2, ..., len(dataset)]
     indices = permutation(key, indices)  # shuffle the indices
     indices = indices[: (n // batch_size) * batch_size]  # drop the last few samples not in a batch
-    return rearrange(indices, '(n b) -> n b', b=batch_size)  # reshape into (n_batches, batch_size)
+    return indices
 
 
 def load_data(batch_size: int, dataset: str = 'binarized_mnist', *, key: PRNGKeyArray) -> Tuple[Iterator, Iterator]:
@@ -46,7 +46,8 @@ def load_data(batch_size: int, dataset: str = 'binarized_mnist', *, key: PRNGKey
         n = len(dataset)
         while True:
             key, subkey = split(key)
-            for batch_indices in get_indices(n, batch_size, subkey):
+            indices = get_indices(n, batch_size, subkey),
+            for batch_indices in rearrange(indices, '(n b) -> n b', b=batch_size):  # reshape into (n_batches, batch_size)
                 yield dataset[batch_indices]
 
     return dataset_iterator(train_dataset, batch_size, key), dataset_iterator(test_dataset, batch_size, key)
