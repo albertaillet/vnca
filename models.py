@@ -45,7 +45,7 @@ def flatten(x: Array) -> Array:
     return rearrange(x, 'c h w -> (c h w)')
 
 
-def damage_half(x: Array, *, key: PRNGKeyArray) -> Array:
+def damage(x: Array, *, key: PRNGKeyArray) -> Array:
     '''Set the cell states of a H//2 x W//2 square to zero.'''
     l, h, w = x.shape
     h_half, w_half = h // 2, w // 2
@@ -326,7 +326,7 @@ class NonDoublingVNCA(AutoEncoder):
 
         return z
 
-    def nca_stages(self, n_channels: int = 1, T: int = 36, damage: set = set(), *, key: PRNGKeyArray) -> Array:
+    def nca_stages(self, n_channels: int = 1, T: int = 36, damage_idx: set = set(), *, key: PRNGKeyArray) -> Array:
         mean = np.zeros(self.latent_size)
         logvar = np.zeros(self.latent_size)
         z = sample_gaussian(mean, logvar, (self.latent_size,), key=key)
@@ -340,7 +340,7 @@ class NonDoublingVNCA(AutoEncoder):
         stages_probs = []
         for i in range(T):
             z = z + self.step(z)
-            if i in damage:
+            if i in damage_idx:
                 key, damage_key = split(key)
                 z = damage(z, key=damage_key)
             stages_probs.append(process(z))
