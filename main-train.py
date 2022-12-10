@@ -103,38 +103,45 @@ def make_pool_step(
         @partial(eqx.filter_value_and_grad, has_aux=True)
         def forward(model: NonDoublingVNCA, x: Array, z_pool_samples: Array, *, key: PRNGKeyArray, t_key: PRNGKeyArray) -> Tuple[Array, Array]:
 
+            # encode x and get parameters of latent distribution, sample z_0 and repeat to (pool_size, z_dim, h, w) 
             mean, logvar = vmap(model.encoder, out_axes=1)(x)
             z_0 = sample_gaussian(mean, logvar, mean.shape, key=key)  # (batch_size, z_dim)
             z_0 = repeat(z_0, 'b c -> b c h w', h=32, w=32)
 
+            # set second half of z_0 to z_pool_samples
             z_0 = z_0.at[n_pool_samples:].set(z_pool_samples)  # (pool_size, z_dim, h, w)
 
+            # decode z_0 to z_T using a random number of steps sampled bewtween N_nca_steps_min and N_nca_steps_max using t_key
             z_T = vmap(partial(model.decode_grid_random, key=t_key))(z_0)
 
+            # crop z_T to x.shape to get reconstructed x
             b, c, h, w = x.shape
             recon_x = vmap(partial(crop, shape=(c, h, w)))(z_T)
 
             # add M diminersion to recon_x
             recon_x_M = repeat(recon_x, 'b c h w -> b m c h w', m=1)
 
+            # get loss
             loss = iwelbo_loss(recon_x_M, x, mean, logvar, M=1)
 
             return loss, (x, z_T)
 
         (loss, (x, z_T)), grads = forward(model, x, z_pool_samples, key=fwd_key, t_key=t_key)
 
+        # update pool
         z_pool = z_pool.at[:batch_size].set(z_T)
         x_pool = x_pool.at[:batch_size].set(x)
+
+        # permute pool
         z_pool = permutation(permutation_key, z_pool, axis=0)
         x_pool = permutation(permutation_key, x_pool, axis=0)
+        pool = (x_pool, z_pool)
 
         loss = lax.pmean(loss, axis_name='num_devices')
         grads = lax.pmean(grads, axis_name='num_devices')
 
         updates, opt_state = optim.update(grads, opt_state)
         params = eqx.apply_updates(params, updates)
-            
-        pool = (x_pool, z_pool)
         
         return (params, opt_state, next_key, next_t_key, pool), loss
 
