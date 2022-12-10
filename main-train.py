@@ -75,7 +75,7 @@ n_tpus, devices
 
 
 # %%
-@partial(pmap, axis_name='num_devices', static_broadcasted_argnums=(3, 6), out_axes=(None, 0, 0))
+@partial(pmap, axis_name='num_devices', static_broadcasted_argnums=(3, 6), out_axes=(None, 0, 0, 0))
 def make_pool_step(
     data: Array, index: Array, params, static, key: PRNGKeyArray, opt_state: tuple, optim: GradientTransformation, t_key: PRNGKeyArray, pool: Tuple[Array, Array]
 ) -> Tuple[float, Module, Any]:
@@ -84,7 +84,7 @@ def make_pool_step(
     n_half_pool_samples = n_pool_samples // 2
 
     def step(carry: Tuple, index: Array) -> Tuple:
-        params, opt_state, key, t_key = carry
+        params, opt_state, key, t_key, pool = carry
         model: NonDoublingVNCA = eqx.combine(params, static)
 
         x = data[index]  # (batch_size, c, h, w)
@@ -133,10 +133,13 @@ def make_pool_step(
 
         updates, opt_state = optim.update(grads, opt_state)
         params = eqx.apply_updates(params, updates)
-        return (params, opt_state, next_key, next_t_key), loss
+            
+        pool = (x_pool, z_pool)
+        
+        return (params, opt_state, next_key, next_t_key, pool), loss
 
-    (params, opt_state, key, t_key), loss = lax.scan(step, (params, opt_state, key, t_key), index)
-    return loss, params, opt_state
+    (params, opt_state, key, t_key, pool), loss = lax.scan(step, (params, opt_state, key, t_key, pool), index)
+    return loss, params, opt_state, pool
 
 
 @partial(pmap, axis_name='num_devices', static_broadcasted_argnums=(2, 4, 5))
@@ -159,7 +162,7 @@ wandb.config.pool_size = 1024 if isinstance(model, NonDoublingVNCA) else None
 
 
 wandb.config.batch_size_per_tpu = wandb.config.batch_size // n_tpus
-wandb.config.l = 125
+wandb.config.l = 250
 wandb.config.n_tpu_steps = wandb.config.n_gradient_steps // wandb.config.l
 wandb.config.pool_size_per_tpu = (wandb.config.pool_size // n_tpus) if isinstance(model, NonDoublingVNCA) else None
 
@@ -183,7 +186,7 @@ train_keys = split(DATA_KEY, wandb.config.n_tpu_steps * n_tpus)
 train_keys = rearrange(train_keys, '(n t) k -> n t k', t=n_tpus, n=wandb.config.n_tpu_steps)
 
 t_keys = split(DATA_KEY, wandb.config.n_tpu_steps)
-t_keys = repeat(train_keys, 'n k -> n t k', t=n_tpus, n=wandb.config.n_tpu_steps)
+t_keys = repeat(t_keys, 'n k -> n t k', t=n_tpus, n=wandb.config.n_tpu_steps)
 
 test_keys = split(TEST_KEY, wandb.config.n_tpu_steps * n_tpus)
 test_keys = rearrange(test_keys, '(n t) k -> n t k', t=n_tpus, n=wandb.config.n_tpu_steps)
@@ -201,8 +204,8 @@ opt_state = device_put_replicated(opt_state, devices)
 if wandb.config.pool_size is not None:
     x_pool = data[0, : wandb.config.pool_size_per_tpu * n_tpus].copy()
     mean, logvar = vmap(model.encoder, out_axes=1)(x_pool)
-    z_pool = sample_gaussian(mean, logvar, mean.shape, key=DATA_KEY)  # (batch_size, z_dim)
-    z_pool = repeat(z_pool, 'n c -> n c h w', h=32, w=32, n=wandb.config.pool_size_per_tpu * n_tpus)
+    z_pool = sample_gaussian(mean, logvar, mean.shape, key=DATA_KEY)
+    z_pool = repeat(z_pool, 'n c -> n c h w', h=32, w=32, n=wandb.config.pool_size_per_tpu * n_tpus, c=model.latent_size)
 
     # reshape to tpus
     x_pool = rearrange(x_pool, '(t n) c h w -> t n c h w', n=wandb.config.pool_size_per_tpu, t=n_tpus, c=1, h=32, w=32)
@@ -227,7 +230,7 @@ pbar = tqdm(
 
 for i, idx, train_key, test_key, t_key in pbar:
     step_time = time.time()
-    loss, params, opt_state = make_pool_step(data, idx, params, static, train_key, opt_state, opt, pool, t_key)
+    loss, params, opt_state, pool = make_pool_step(data, idx, params, static, train_key, opt_state, opt, t_key, pool)
     step_time = time.time() - step_time
 
     n_gradient_steps = i * wandb.config.l
@@ -252,7 +255,7 @@ for i, idx, train_key, test_key, t_key in pbar:
         step=n_gradient_steps,
     )
 
-    if n_gradient_steps % wandb.config.log_every == 0:
+    if n_gradient_steps % wandb.config.log_every == 0 or n_gradient_steps == wandb.config.l:
         model = eqx.combine(tree_map(partial(np.mean, axis=0), params), static)
         save_model(model, n_gradient_steps)
         wandb.log(
@@ -261,7 +264,7 @@ for i, idx, train_key, test_key, t_key in pbar:
                 'reconstructions': to_img(log_reconstructions(model, test_data[0], key=LOGGING_KEY)),
                 'samples': to_img(log_samples(model, key=LOGGING_KEY)),
                 'growth_plot': to_img(log_growth_stages(model, key=LOGGING_KEY)) if isinstance(model, DoublingVNCA) else None,
-                'nca_stages': to_img(log_nca_stages(model, key=LOGGING_KEY)) if isinstance(model, NonDoublingVNCA) else None,
+                'nca_stages': to_img(log_nca_stages(model, key=LOGGING_KEY, ih=9, iw=8)) if isinstance(model, NonDoublingVNCA) else None,
             },
             step=n_gradient_steps,
             commit=True,
