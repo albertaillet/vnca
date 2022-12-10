@@ -49,7 +49,7 @@ from optax import adam, clip_by_global_norm, chain
 from data import load_data_on_tpu, indicies_tpu_iterator
 from loss import forward, iwelbo_loss
 from models import AutoEncoder, BaselineVAE, DoublingVNCA, NonDoublingVNCA, sample_gaussian, crop, damage
-from log_utils import save_model, restore_model, to_img, log_center, log_samples, log_reconstructions, log_growth_stages, log_nca_stages
+from log_utils import save_model, restore_model, to_wandb_img, log_center, log_samples, log_reconstructions, log_growth_stages, log_nca_stages
 
 # typing
 from jax import Array
@@ -267,11 +267,11 @@ for i, idx, train_key, test_key, t_key in pbar:
         save_model(model, n_gradient_steps)
         wandb.log(
             {
-                'center': to_img(log_center(model)),
-                'reconstructions': to_img(log_reconstructions(model, test_data[0], key=LOGGING_KEY)),
-                'samples': to_img(log_samples(model, key=LOGGING_KEY)),
-                'growth_plot': to_img(log_growth_stages(model, key=LOGGING_KEY)) if isinstance(model, DoublingVNCA) else None,
-                'nca_stages': to_img(log_nca_stages(model, key=LOGGING_KEY, ih=9, iw=8)) if isinstance(model, NonDoublingVNCA) else None,
+                'center': to_wandb_img(log_center(model)),
+                'reconstructions': to_wandb_img(log_reconstructions(model, test_data[0], key=LOGGING_KEY)),
+                'samples': to_wandb_img(log_samples(model, key=LOGGING_KEY)),
+                'growth_plot': to_wandb_img(log_growth_stages(model, key=LOGGING_KEY)) if isinstance(model, DoublingVNCA) else None,
+                'nca_stages': to_wandb_img(log_nca_stages(model, key=LOGGING_KEY, ih=9, iw=8)) if isinstance(model, NonDoublingVNCA) else None,
             },
             step=n_gradient_steps,
             commit=True,
