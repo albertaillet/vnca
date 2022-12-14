@@ -66,7 +66,7 @@ LOGGING_KEY = PRNGKey(3)
 
 
 # %%
-model = NonDoublingVNCA(key=MODEL_KEY)
+model = NonDoublingVNCA(key=MODEL_KEY, latent_size=128)
 
 n_tpus = local_device_count()
 devices = local_devices()
@@ -75,20 +75,22 @@ n_tpus, devices
 
 
 # %%
-@partial(pmap, axis_name='num_devices', static_broadcasted_argnums=(3, 6), out_axes=(None, 0, 0, 0))
+@partial(pmap, donate_argnums=(1, 2, 4, 5, 7, 8), axis_name='num_devices', static_broadcasted_argnums=(3, 6), out_axes=(None, 0, 0, 0))
 def make_pool_step(
     data: Array, index: Array, params, static, key: PRNGKeyArray, opt_state: tuple, optim: GradientTransformation, t_key: PRNGKeyArray, pool: Tuple[Array, Array]
 ) -> Tuple[float, Module, Any]:
     batch_size = index.shape[1]
     n_pool_samples = batch_size // 2
     n_half_pool_samples = n_pool_samples // 2
+    axis_index = lax.axis_index('num_devices')
 
+    @partial(jit, donate_argnums=(0, 1))
     def step(carry: Tuple, index: Array) -> Tuple:
         params, opt_state, key, t_key, pool = carry
         model: NonDoublingVNCA = eqx.combine(params, static)
 
         x = data[index]  # (batch_size, c, h, w)
-        next_key, fwd_key, permutation_key, subkey = split(key, 4)
+        next_key, fwd_key, subkey = split(key, 3)
         t_key, next_t_key = split(t_key, 2)
 
         x_pool, z_pool = pool  # (pool_size, c, h, w), (pool_size, z_dim, h, w)
@@ -103,7 +105,7 @@ def make_pool_step(
         @partial(eqx.filter_value_and_grad, has_aux=True)
         def forward(model: NonDoublingVNCA, x: Array, z_pool_samples: Array, *, key: PRNGKeyArray, t_key: PRNGKeyArray) -> Tuple[Array, Array]:
 
-            # encode x and get parameters of latent distribution, sample z_0 and repeat to (pool_size, z_dim, h, w) 
+            # encode x and get parameters of latent distribution, sample z_0 and repeat to (pool_size, z_dim, h, w)
             mean, logvar = vmap(model.encoder, out_axes=1)(x)
             z_0 = sample_gaussian(mean, logvar, mean.shape, key=key)  # (batch_size, z_dim)
             z_0 = repeat(z_0, 'b c -> b c h w', h=32, w=32)
@@ -132,9 +134,11 @@ def make_pool_step(
         z_pool = z_pool.at[:batch_size].set(z_T)
         x_pool = x_pool.at[:batch_size].set(x)
 
-        # permute pool
-        z_pool = permutation(permutation_key, z_pool, axis=0)
-        x_pool = permutation(permutation_key, x_pool, axis=0)
+        # Permute whole pool
+        p, c, h, w = z_pool.shape
+        z_pool = permutation(next_t_key, lax.all_gather(z_pool, 'num_devices')).reshape(n_tpus, p, c, h, w)[axis_index]
+        x_pool = permutation(next_t_key, lax.all_gather(x_pool, 'num_devices')).reshape(n_tpus, p, 1, h, w)[axis_index]
+
         pool = (x_pool, z_pool)
 
         loss = lax.pmean(loss, axis_name='num_devices')
@@ -142,7 +146,7 @@ def make_pool_step(
 
         updates, opt_state = optim.update(grads, opt_state)
         params = eqx.apply_updates(params, updates)
-        
+
         return (params, opt_state, next_key, next_t_key, pool), loss
 
     (params, opt_state, key, t_key, pool), loss = lax.scan(step, (params, opt_state, key, t_key, pool), index)
@@ -163,13 +167,13 @@ wandb.init(project='vnca', entity='dladv-vnca', mode='online')
 
 wandb.config.model_type = model.__class__.__name__
 wandb.config.latent_size = model.latent_size
-wandb.config.batch_size = 32
+wandb.config.batch_size = 128
 wandb.config.n_gradient_steps = 100_000
 wandb.config.pool_size = 1024 if isinstance(model, NonDoublingVNCA) else None
 
 
 wandb.config.batch_size_per_tpu = wandb.config.batch_size // n_tpus
-wandb.config.l = 250
+wandb.config.l = 125
 wandb.config.n_tpu_steps = wandb.config.n_gradient_steps // wandb.config.l
 wandb.config.pool_size_per_tpu = (wandb.config.pool_size // n_tpus) if isinstance(model, NonDoublingVNCA) else None
 
