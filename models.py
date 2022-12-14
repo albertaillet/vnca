@@ -1,6 +1,6 @@
 from jax import vmap, checkpoint
 import jax.numpy as np
-from jax.random import split, normal, bernoulli
+from jax.random import split, normal, bernoulli, randint
 from jax.nn import elu, sigmoid
 from jax import lax
 
@@ -43,6 +43,20 @@ def pad(x: Array, p: int, c: float) -> Array:
 
 def flatten(x: Array) -> Array:
     return rearrange(x, 'c h w -> (c h w)')
+
+
+def damage(x: Array, *, key: PRNGKeyArray) -> Array:
+    '''Set the cell states of a H//2 x W//2 square to zero.'''
+    l, h, w = x.shape
+    h_half, w_half = h // 2, w // 2
+    hmask, wmask = randint(
+        key=key,
+        shape=(2,),
+        minval=np.zeros(2, dtype=np.int32),
+        maxval=np.array([h_half, w_half], dtype=np.int32),
+    )
+    update = np.zeros((l, h_half, w_half), dtype=np.float32)
+    return lax.dynamic_update_slice(x, update, (0, hmask, wmask))
 
 
 Flatten: Lambda = Lambda(flatten)
@@ -155,6 +169,18 @@ class NCAStep(Sequential):
         )
 
 
+class NCAStepSimple(Sequential):
+    def __init__(self, latent_size: int, *, key: PRNGKeyArray) -> None:
+        key1, key2 = split(key)
+        super().__init__(
+            [
+                Conv2d(latent_size, latent_size, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), key=key1),
+                Elu,
+                Conv2dZeroInit(latent_size, latent_size, kernel_size=(1, 1), stride=(1, 1), key=key2),
+            ]
+        )
+
+
 class AutoEncoder(Module):
     latent_size: int
 
@@ -259,31 +285,48 @@ class DoublingVNCA(AutoEncoder):
 
 class NonDoublingVNCA(AutoEncoder):
     encoder: Encoder
-    step: NCAStep
+    step: NCAStepSimple
     latent_size: int
     N_nca_steps: int
+    N_nca_steps_min: int
+    N_nca_steps_max: int
 
-    def __init__(self, latent_size: int = 256, N_nca_steps: int = 36, *, key: PRNGKeyArray) -> None:
+    def __init__(self, latent_size: int = 256, N_nca_steps: int = 36, N_nca_steps_min: int = 32, N_nca_steps_max: int = 64, *, key: PRNGKeyArray) -> None:
         key1, key2 = split(key)
         self.encoder = Encoder(latent_size=latent_size, key=key1)
-        self.step = NCAStep(latent_size=latent_size, key=key2)
+        self.step = NCAStepSimple(latent_size=latent_size, key=key2)
         self.latent_size = latent_size
         self.N_nca_steps = N_nca_steps
+        self.N_nca_steps_min = N_nca_steps_min
+        self.N_nca_steps_max = N_nca_steps_max
 
     def decoder(self, z: Array) -> Array:
         # repeat the latent sample over the image dimensions
         z = repeat(z, 'c -> c h w', h=32, w=32)
 
-        # Apply the NCA steps
-        @checkpoint
-        def scan_fn(z, _):
-            return (lax.add(z, self.step(z)), None)
+        # decode the latent sample by applying the NCA steps
+        return self.decode_grid(z, T=self.N_nca_steps)
 
-        z, _ = lax.scan(scan_fn, z, None, length=self.N_nca_steps)
+    def decode_grid_random(self, z: Array, *, key: PRNGKeyArray) -> Array:
+        T = randint(key, shape=(1,), minval=self.N_nca_steps_min, maxval=self.N_nca_steps_max)
+        return self.decode_grid(z, T=T)
+
+
+    def decode_grid(self, z: Array, T: Array) -> Array:
+        # Apply the NCA steps
+        true_fun = lambda z: z + self.step(z)
+        false_fun = lambda z: z
+
+        @checkpoint
+        def scan_fn(z: Array, t: int) -> Tuple[Array, Array]:
+            z = lax.cond(t, true_fun, false_fun, z)
+            return z, None
+
+        z, _ = lax.scan(scan_fn, z, (np.arange(self.N_nca_steps_max) < T))
 
         return z
 
-    def nca_stages(self, n_channels: int = 1, *, key: PRNGKeyArray) -> Array:
+    def nca_stages(self, n_channels: int = 1, T: int = 36, damage_idx: set = set(), *, key: PRNGKeyArray) -> Array:
         mean = np.zeros(self.latent_size)
         logvar = np.zeros(self.latent_size)
         z = sample_gaussian(mean, logvar, (self.latent_size,), key=key)
@@ -295,8 +338,11 @@ class NonDoublingVNCA(AutoEncoder):
 
         # Decode the latent sample and save the processed image channels
         stages_probs = []
-        for _ in range(self.N_nca_steps):
+        for i in range(T):
             z = z + self.step(z)
+            if i in damage_idx:
+                key, damage_key = split(key)
+                z = damage(z, key=damage_key)
             stages_probs.append(process(z))
 
         return np.array(stages_probs)

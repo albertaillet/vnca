@@ -12,13 +12,18 @@ from jax.random import PRNGKeyArray
 from equinox import Module
 
 
-def iwelbo_loss(model: Module, x: Array, key: PRNGKeyArray, M: int = 1, beta: int = 1) -> float:
-
+def forward(model: Module, x: Array, key: PRNGKeyArray, M: int = 1, beta: int = 1) -> float:
     # Split the key to have one for each sample
     keys = split(key, x.shape[0])
 
     # Vmap over the batch, we need filter since model is a Module
     recon_x, mean, logvar = filter_vmap(model)(x, key=keys, M=M)
+
+    return iwelbo_loss(recon_x, x, mean, logvar, M, beta=beta)
+
+
+def iwelbo_loss(recon_x: Array, x: Array, mean: Array, logvar: Array, M: int = 1, beta: int = 1) -> float:
+    '''Compute the IWELBO loss.'''
 
     # Posterior p_{\theta}(z|x)
     post = Normal(np.zeros_like(mean), np.ones_like(logvar))

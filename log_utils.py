@@ -5,6 +5,7 @@ from jax.nn import sigmoid
 from einops import rearrange
 from jax.random import split, randint
 from jax import vmap
+from PIL import Image
 
 from models import AutoEncoder, DoublingVNCA, NonDoublingVNCA
 
@@ -25,10 +26,15 @@ def restore_model(model_like, file_name, run_path=None):
     return model
 
 
-def to_img(x: Array) -> wandb.Image:
+def to_wandb_img(x: Array) -> wandb.Image:
     '''Converts an array of shape (c, h, w) to a wandb Image'''
+    return wandb.Image(to_PIL_img(x))
+
+
+def to_PIL_img(x: Array) -> Image:
+    '''Converts an array of shape (c, h, w) to a PIL Image'''
     x = np.clip(x, 0, 1)
-    return wandb.Image(np.array(255 * x, dtype=np.uint8)[0])
+    return Image.fromarray(np.array(255 * x, dtype=np.uint8)[0])
 
 
 @eqx.filter_jit
@@ -68,8 +74,6 @@ def log_growth_stages(model: DoublingVNCA, *, key: PRNGKeyArray) -> Array:
 
 
 @eqx.filter_jit
-def log_nca_stages(model: NonDoublingVNCA, ih: int = 4, *, key: PRNGKeyArray) -> Array:
-    stages = model.nca_stages(key=key)
-    assert model.N_nca_steps % ih == 0, 'ih must be divide by N_nca_steps'
-    iw = model.N_nca_steps // ih
+def log_nca_stages(model: NonDoublingVNCA, ih: int = 4, iw: int = 9, *, key: PRNGKeyArray) -> Array:
+    stages = model.nca_stages(T=ih * iw, key=key)
     return to_grid(stages, ih=ih, iw=iw)
