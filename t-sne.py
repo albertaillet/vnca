@@ -37,18 +37,15 @@ from jax import numpy as np
 from jax import random, lax
 from sklearn.manifold import TSNE
 from functools import partial
-
-import numpy as onp
 import matplotlib.pyplot as plt
 
 from data import get_data
 
 import equinox as eqx
-from models import AutoEncoder, BaselineVAE, DoublingVNCA, NonDoublingVNCA, sample_gaussian
+from models import AutoEncoder, BaselineVAE, DoublingVNCA, NonDoublingVNCA
 
 # typing
 from jax import Array
-from jax.random import PRNGKeyArray
 from typing import Tuple, Any
 
 DATA_KEY = random.PRNGKey(0)
@@ -57,7 +54,7 @@ DATA_KEY = random.PRNGKey(0)
 # %%
 # Load the data
 _, test_data = get_data('binarized_mnist', DATA_KEY)
-#test_labels = np.load('../../input/tsne-20221207-ver2/binarized_test_labels.npy')
+test_labels = np.load('../../input/tsne-20221207-ver2/binarized_test_labels.npy')
 
 
 # %%
