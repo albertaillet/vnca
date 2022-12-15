@@ -1,8 +1,8 @@
-# Re-implementation of Variational Neural Cellular Automata [1]
+# Re-implementation of Variational Neural Cellular Automata
 
 The repository contains code for the reproduction of the results from "Variational Neural Cellular Automata" [1] for the course [DD2412 Deep Learning, Advanced. KTH (Royal Institute of Technology), Stockholm, Sweden](https://www.kth.se/student/kurser/kurs/DD2412?l=en).
 
-The autograd engine [JAX](https://github.com/google/jax), the neural network library [equinox](https://github.com/patrick-kidger/equinox), the optimization library [optax](https://github.com/deepmind/optax) and the tensor opertation library [einops](https://github.com/arogozhnikov/einops) are used.
+The autograd engine [JAX](https://github.com/google/jax), the neural network library [equinox](https://github.com/patrick-kidger/equinox), the optimization library [optax](https://github.com/deepmind/optax) and the tensor operation library [einops](https://github.com/arogozhnikov/einops) are used.
 
 The results using the binarized MNIST dataset [2] are the main points of the paper reproduced.
 
@@ -26,7 +26,7 @@ To train a model using 8 v3 TPUs available on [Kaggle](https://www.kaggle.com/),
 
 Then select the TPU accelerator:
 
-<img src="./images/kaggle_accelerator.png" alt="drawing" width="200"/>
+<img src="./images/kaggle_accelerator.png" alt="drawing" width="400"/>
 
 The script can then be run as a notebook.
 
@@ -43,9 +43,9 @@ Our model achieves the following performance on :
 
 | Model name         | ELBO evaluated on the test set using 128 importance weighted samples. |
 | --------------- |----------- |
-| BaselineVAE     | -83.88191  |
-| DoublingVNCA    | -83.56006  |
-| NonDoublingVNCA | -87.922325 |
+| BaselineVAE     | -83.88191 nats  |
+| DoublingVNCA    | -83.56006 nats  |
+| NonDoublingVNCA | -87.922325 nats |
 
 <!-- 📋  Include a table of results from your paper, and link back to the leaderboard for clarity and context. If your main result is a figure, include that figure and link to the command or notebook to reproduce it.--> 
 
