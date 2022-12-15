@@ -15,12 +15,14 @@ from jax.random import PRNGKeyArray
 
 
 def save_model(model, step):
+    '''Saves the model to wandb'''
     model_file_name = f'{model.__class__.__name__}_gstep{step}.eqx'
     eqx.tree_serialise_leaves(model_file_name, model)
     wandb.save(model_file_name)
 
 
 def restore_model(model_like, file_name, run_path=None):
+    '''Restores the model from wandb, given a model_like object and the file name'''
     wandb.restore(file_name, run_path=run_path)
     model = eqx.tree_deserialise_leaves(file_name, model_like)
     return model
@@ -45,11 +47,13 @@ def to_grid(x: Array, ih: int, iw: int) -> Array:
 
 @eqx.filter_jit
 def log_center(model: AutoEncoder) -> Array:
+    '''Returns the center of the latent space'''
     return sigmoid(model.center())
 
 
 @eqx.filter_jit
 def log_samples(model: AutoEncoder, ih: int = 4, iw: int = 8, *, key: PRNGKeyArray) -> Array:
+    '''Returns a grid of samples from the model'''
     keys = split(key, ih * iw)
     samples = vmap(model.sample)(key=keys)
     samples = sigmoid(samples)
@@ -58,6 +62,7 @@ def log_samples(model: AutoEncoder, ih: int = 4, iw: int = 8, *, key: PRNGKeyArr
 
 @eqx.filter_jit
 def log_reconstructions(model: AutoEncoder, data: Array, ih: int = 4, iw: int = 8, *, key: PRNGKeyArray) -> Array:
+    '''Returns a grid of reconstructions from the model'''
     idx = randint(key, (ih * iw,), 0, len(data))
     keys = split(key, ih * iw)
     x = data[idx]
@@ -69,11 +74,13 @@ def log_reconstructions(model: AutoEncoder, data: Array, ih: int = 4, iw: int = 
 
 @eqx.filter_jit
 def log_growth_stages(model: DoublingVNCA, *, key: PRNGKeyArray) -> Array:
+    '''Returns a grid of growth stages from the DoublingVNCA model'''
     stages = model.growth_stages(key=key)
     return to_grid(stages, ih=model.K, iw=model.N_nca_steps + 1)
 
 
 @eqx.filter_jit
 def log_nca_stages(model: NonDoublingVNCA, ih: int = 4, iw: int = 9, *, key: PRNGKeyArray) -> Array:
+    '''Returns a grid of NCA stages from the NonDoublingVNCA model'''
     stages = model.nca_stages(T=ih * iw, key=key)
     return to_grid(stages, ih=ih, iw=iw)
