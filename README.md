@@ -43,9 +43,9 @@ Our model achieves the following performance on :
 
 | Model name         | ELBO evaluated on the test set using 128 importance weighted samples. |
 | --------------- |----------- |
-| BaselineVAE     | -83.88191 nats  |
-| DoublingVNCA    | -83.56006 nats  |
-| NonDoublingVNCA | -87.922325 nats |
+| BaselineVAE     | -83.88 nats  |
+| DoublingVNCA    | -83.56 nats  |
+| NonDoublingVNCA | -87.92 nats |
 
 <!-- 📋  Include a table of results from your paper, and link back to the leaderboard for clarity and context. If your main result is a figure, include that figure and link to the command or notebook to reproduce it.--> 
 
