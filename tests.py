@@ -2,10 +2,8 @@ import equinox as eqx
 from jax import numpy as np
 from jax.random import PRNGKey
 from jax.tree_util import tree_leaves
-from models import Module, BaselineVAE, DoublingVNCA, NonDoublingVNCA, Double
+from models import BaselineVAE, DoublingVNCA, NonDoublingVNCA, Double
 from pytest import fixture
-
-from typing import Tuple
 
 
 def test_shapes():
@@ -26,6 +24,7 @@ def test_shapes():
 
 
 def test_doubling_vnca_num_parameters():
+    '''Test that the DoublingVNCA model has the correct number of parameters'''
     key = PRNGKey(0)
     model = DoublingVNCA(latent_size=256, key=key)
     n_params = sum(x.size for x in tree_leaves(eqx.filter(model, eqx.is_array)))
@@ -59,4 +58,5 @@ def doubled_img():
 
 
 def test_double_shape(img, doubled_img):
+    '''Test that the Double module doubles the image size'''
     assert np.all(Double(img) == doubled_img)
