@@ -1,69 +1,55 @@
-# Re-implemenetation of Variational Neural Cellular Automata [1]
+# Re-implementation of Variational Neural Cellular Automata [1]
 
-The repository contains code for the reproduction of the results from "Variational Neural Cellular Automata" [1]. 
+The repository contains code for the reproduction of the results from "Variational Neural Cellular Automata" [1] for the course [DD2412 Deep Learning, Advanced. KTH (Royal Institute of Technology), Stockholm, Sweden](https://www.kth.se/student/kurser/kurs/DD2412?l=en).
 
-The deep learning framework [JAX](https://github.com/google/jax) and the neural network library [equinox](https://github.com/patrick-kidger/equinox) are used.
+The autograd engine [JAX](https://github.com/google/jax), the neural network library [equinox](https://github.com/patrick-kidger/equinox), the optimization library [optax](https://github.com/deepmind/optax) and the tensor opertation library [einops](https://github.com/arogozhnikov/einops) are used.
 
-The results using the binarized MNIST dataset are the main points of the paper reproduced.
+The results using the binarized MNIST dataset [2] are the main points of the paper reproduced.
 
 >📋  Optional: include a graphic explaining your approach/main result, bibtex entry, link to demos, blog posts and tutorials
 
 ## Requirements
 
-To install requirements:
+To install requirements locally, run the following command:
 
 ```setup
 pip install -r requirements.txt
 ```
 
->📋  Describe how to set up the environment, e.g. pip/conda/docker commands, download datasets, etc...
-
 ## Training
 
-The file ´models.py´ contains all the implemented models.
+To train a model using 8 v3 TPUs available on [Kaggle](https://www.kaggle.com/), import the script `main-train.py` as a kaggle notebook under:
 
-To train the model(s) in the paper, run this command:
++ Create -> New Notebook -> File -> Import Notebook
 
-```train
-python train.py --input-data <path_to_data> --alpha 10 --beta 20
-```
+<img src="./images/kaggle_import.png" alt="drawing" width="400"/>
 
->📋  Describe how to train the models, with example commands on how to train the models in your paper, including the full training procedure and appropriate hyperparameters.
+Then select the TPU accelerator:
+
+<img src="./images/kaggle_accelerator.png" alt="drawing" width="200"/>
+
+The script can then be run as a notebook.
 
 ## Evaluation
 
-To evaluate my model on ImageNet, run:
+To evaluate a trained model, the script to be used is `eval.py`. The script should be loaded onto Kaggle in the same way as the training script.
 
-```eval
-python eval.py --model-file mymodel.pth --benchmark imagenet
-```
-
->📋  Describe how to evaluate the trained models on benchmarks reported in the paper, give commands that produce the results (section below).
-
-## Pre-trained Models
-
-You can download pretrained models here:
-
-- [My awesome model](https://drive.google.com/mymodel.pth) trained on ImageNet using parameters x,y,z. 
-
->📋  Give a link to where/how the pretrained models can be downloaded and how they were trained (if applicable).  Alternatively you can have an additional column in your results table with a link to the models.
 
 ## Results
 
 Our model achieves the following performance on :
 
-### [Image Classification on ImageNet](https://paperswithcode.com/sota/image-classification-on-imagenet)
+### [Image Generation on Binarized MNIST](https://paperswithcode.com/sota/image-generation-on-binarized-mnist)
 
-| Model name         | Top 1 Accuracy  | Top 5 Accuracy |
-| ------------------ |---------------- | -------------- |
-| My awesome model   |     85%         |      95%       |
+| Model name         | ELBO evaluated on the test set using 128 importance weighted samples. |
+| --------------- |----------- |
+| BaselineVAE     | -83.88191  |
+| DoublingVNCA    | -83.56006  |
+| NonDoublingVNCA | -87.922325 |
 
->📋  Include a table of results from your paper, and link back to the leaderboard for clarity and context. If your main result is a figure, include that figure and link to the command or notebook to reproduce it. 
-
-
-## Contributing
-
->📋  Pick a licence and describe how to contribute to your code repository. 
+<!-- 📋  Include a table of results from your paper, and link back to the leaderboard for clarity and context. If your main result is a figure, include that figure and link to the command or notebook to reproduce it.--> 
 
 
 [1] R. B. Palm, M. G. Duque, S. Sudhakaran, and S. Risi. “Variational Neural Cellular Automata.” ICLR 2022
+
+[2] H Larochelle and I Murray. The neural autoregressive distribution estimator.
