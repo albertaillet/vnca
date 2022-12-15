@@ -4,4 +4,5 @@ data/raw/
 sandbox.*
 .DS_Store
 *.ipynb
-models/
+*.eqx
+latent_interpolate/
