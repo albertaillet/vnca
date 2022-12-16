@@ -1,12 +1,8 @@
 import jax.numpy as np
-from jax.random import split, PRNGKeyArray, permutation, PRNGKey
+from jax.random import split, PRNGKeyArray, permutation
 from jax import device_put_replicated, device_put_sharded
 from einops import rearrange
 
-
-# typing
-from jax import Array
-from typing import Tuple
 
 # typing
 from jax import Array
