@@ -6,7 +6,7 @@ The autograd engine [JAX](https://github.com/google/jax), the neural network lib
 
 The results using the binarized MNIST dataset [2] are the main points of the paper reproduced.
 
->📋  Optional: include a graphic explaining your approach/main result, bibtex entry, link to demos, blog posts and tutorials
+<img src="./images/damage_full.png" alt="drawing" width="400"/>
 
 ## Requirements
 
@@ -48,6 +48,30 @@ Our model achieves the following performance on :
 | NonDoublingVNCA | -87.92 nats |
 
 <!-- 📋  Include a table of results from your paper, and link back to the leaderboard for clarity and context. If your main result is a figure, include that figure and link to the command or notebook to reproduce it.--> 
+
+## Figures
+
+The different figures from the paper can be reproduced using the following scripts:
+
+| Figure         | Script to reproduce the figure |
+| --------------- |----------- |
+| Figure 2     | `sample.py`  |
+| Figure 3    | `sample.py`  |
+| Figure 4 | `latent_interpolate.py` and `t-sne.py` |
+| Figure 5 | `damage_recovery.py` |
+| Figure 6 | `linear_probe_figure.py` |
+| Figure 7 | `latent_viz.py` |
+
+## Tests
+
+To run a few tests that test the model output shape and the doubling operation, run the following command:
+
+```pytonn
+pytest tests.py
+```
+
+
+## References
 
 
 [1] R. B. Palm, M. G. Duque, S. Sudhakaran, and S. Risi. “Variational Neural Cellular Automata.” ICLR 2022
