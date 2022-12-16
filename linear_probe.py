@@ -2,63 +2,50 @@
 from IPython import get_ipython
 
 get_ipython().system('git clone https://github.com/albertaillet/vnca.git')
+
+
+# %%
+get_ipython().system('pip install equinox wandb einops optax')
+
+
+# %%
 get_ipython().run_line_magic('cd', '/kaggle/working/vnca')
 
 
 # %%
-get_ipython().run_cell_magic('capture', '', '!pip install equinox wandb einops optax')
-
-
-# %%
-from log_utils import restore_model
-from models import NonDoublingVNCA, sample_gaussian
-from jax.random import PRNGKey, split, permutation, PRNGKeyArray, randint, shuffle
-from jax import jit, vmap
-import data
-import jax.numpy as np
-from jax.lax import scan
 import jax
-from jax import Array
-import wandb
+from jax import jit, vmap
+from jax.lax import scan
+from jax import numpy as np
+from jax.random import PRNGKey, split, permutation, PRNGKeyArray, randint
 import equinox as eqx
 from einops import repeat, rearrange
-import pickle
-import matplotlib.pyplot as plt
-from functools import partial
 import optax
 from tqdm import tqdm
+import matplotlib.pyplot as plt
+
+import data
+from log_utils import restore_model
+from models import NonDoublingVNCA, sample_gaussian
+
+
+# typing
+from jax import Array
+
 
 MODEL_KEY = PRNGKey(0)
 SAMPLE_KEY = PRNGKey(1)
 SPLIT = 8000
 
-from kaggle_secrets import UserSecretsClient
-
-user_secrets = UserSecretsClient()
-secret_value_0 = user_secrets.get_secret("wandb")
-
-
-# %%
-get_ipython().system('wandb login $secret_value_0')
-
 
 # %%
 # Load and restore model
 model = NonDoublingVNCA(key=MODEL_KEY, latent_size=128)
-
-
-# %%
-wandb.restore("NonDoublingVNCA_gstep100000.eqx", run_path="dladv-vnca/vnca/runs/3k9mouaj")
-model = eqx.tree_deserialise_leaves("NonDoublingVNCA_gstep100000.eqx", model)
+model = restore_model(model, "NonDoublingVNCA_gstep100000.eqx", run_path="dladv-vnca/vnca/runs/3k9mouaj")
 
 
 # %%
 _, test = data.get_data()
-
-
-# %%
-# rand_test = permutation(MODEL_KEY,test)
-# train, test_test = rand_test[:SPLIT], rand_test[:SPLIT]
 
 
 # %%
@@ -143,10 +130,6 @@ del y
 
 
 # %%
-train_input.shape
-
-
-# %%
 probe = eqx.nn.Linear(128, 10, key=MODEL_KEY)
 batch_size = 4096 * 16
 
@@ -192,10 +175,6 @@ plt.imshow(rearrange(vmap(model)(train_input[: 32 * 32]), "(h w) c-> c h w ", h=
 
 # %%
 a = s_forward(None, test[1234])
-
-
-# %%
-x.shape
 
 
 # %%
