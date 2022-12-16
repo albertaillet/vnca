@@ -74,6 +74,6 @@ pytest tests.py
 ## References
 
 
-[1] R. B. Palm, M. G. Duque, S. Sudhakaran, and S. Risi. “Variational Neural Cellular Automata.” ICLR 2022
+[1] R. B. Palm, M. G. Duque, S. Sudhakaran, and S. Risi. Variational Neural Cellular Automata. ICLR 2022
 
 [2] H Larochelle and I Murray. The neural autoregressive distribution estimator.
