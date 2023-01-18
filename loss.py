@@ -17,7 +17,7 @@ def forward(model: Module, x: Array, key: PRNGKeyArray, M: int = 1, beta: int = 
     keys = split(key, x.shape[0])
 
     # Vmap over the batch, we need filter since model is a Module
-    recon_x, mean, logvar = filter_vmap(model)(x, key=keys, M=M)
+    recon_x, _, mean, logvar = filter_vmap(model)(x, key=keys, M=M)
 
     return vae_loss(recon_x, x, mean, logvar, M, beta=beta)
 
