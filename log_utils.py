@@ -61,7 +61,7 @@ def log_reconstructions(model: AutoEncoder, data: Array, ih: int = 4, iw: int = 
     idx = randint(key, (ih * iw,), 0, len(data))
     keys = split(key, ih * iw)
     x = data[idx]
-    reconstructions, _, _ = vmap(model)(x, key=keys)
+    reconstructions, _, _, _ = vmap(model)(x, key=keys)
     reconstructions = rearrange(reconstructions, 'n m c h w -> (n m) c h w')
     reconstructions = sigmoid(reconstructions)
     return to_grid(reconstructions, ih=ih, iw=iw)
