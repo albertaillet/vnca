@@ -1,24 +1,23 @@
 # %%
 # This script demonstrates the damage recovery capabilities of the NonDoublingVNCA model
-from jax import random
+from jax.random import PRNGKey, split
 from models import NonDoublingVNCA
 from matplotlib import pyplot as plt
-from equinox import tree_deserialise_leaves
-from log_utils import to_grid, to_PIL_img
+from log_utils import restore_model, to_grid, to_PIL_img
 
 
 # %%
 # Load the model
-vnca_model = NonDoublingVNCA(latent_size=128, key=random.PRNGKey(0))
-vnca_model: NonDoublingVNCA = tree_deserialise_leaves('models/NonDoublingVNCA_gstep100000.eqx', vnca_model)
+vnca_model = NonDoublingVNCA(latent_size=128, key=PRNGKey(0))
+vnca_model = restore_model(vnca_model, 'NonDoublingVNCA_gstep100000.eqx', run_path='dladv-vnca/vnca/runs/1mmyyzbu')
 
 
 # %%
 # Generate 100 steps and damage the 50th
-ih, iw = 10, 10
+ih, iw = 10, 8
 T = ih * iw
-damage_idx = {50}
-key = random.PRNGKey(1)
+damage_idx = {T // 2}
+key = PRNGKey(2)
 out = vnca_model.nca_stages(n_channels=1, T=T, damage_idx=damage_idx, key=key)
 
 
@@ -34,8 +33,8 @@ damage_idx = {36}
 original = []
 damaged = []
 recovered = []
-key = random.PRNGKey(0)
-keys = random.split(key, num=10)
+key = PRNGKey(0)
+keys = split(key, num=11)
 for key in keys:
     out = vnca_model.nca_stages(n_channels=1, T=T, damage_idx=damage_idx, key=key)
     original.append(out[35])
@@ -58,3 +57,5 @@ for i, img, title in zip([1, 2, 3], [original_img, damaged_img, recovered_img], 
     plt.axis('off')
 plt.tight_layout()
 plt.show()
+
+# %%

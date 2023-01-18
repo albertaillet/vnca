@@ -1,11 +1,11 @@
 # %%
 from IPython import get_ipython
 
-get_ipython().system('git clone https://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@github.com/albertaillet/vnca.git -b log-outputs')
+get_ipython().system('git clone https://github.com/albertaillet/vnca.git')
 
 
 # %%
-get_ipython().run_cell_magic('capture', '', '%pip install --upgrade tensorflow_probability tensorflow jax jaxlib numpy equinox einops optax distrax scikit-learn keras')
+get_ipython().system('pip install -r /kaggle/working/vnca/requirements.txt')
 
 
 # %%
@@ -40,8 +40,7 @@ from functools import partial
 import matplotlib.pyplot as plt
 
 from data import get_data
-
-import equinox as eqx
+from log_utils import restore_model
 from models import AutoEncoder, BaselineVAE, DoublingVNCA, NonDoublingVNCA
 
 # typing
@@ -52,30 +51,37 @@ DATA_KEY = random.PRNGKey(0)
 
 
 # %%
-# Load the data
-_, test_data = get_data('binarized_mnist', DATA_KEY)
-test_labels = np.load('../../input/tsne-20221207-ver2/binarized_test_labels.npy')
+# Load the binarized data and labels
+_, test_data = get_data('binarized_mnist')
+test_labels = np.load('/kaggle/input/labels/binarized_test_labels.npy')
 
 
 # %%
-# Load the model
-vnca_model = DoublingVNCA(latent_size=256, key=random.PRNGKey(0))
-vnca_model = eqx.tree_deserialise_leaves('../../input/tsne-20221207/DoublingVNCA_gstep60000.eqx', vnca_model)
-
-
-# %%
-def get_latent_sample(c, x: Array, *, model: AutoEncoder) -> Tuple[Any, Array]:
-    mean, _ = model.encoder(x)
-    return c, mean
+# Load and restore model
+model = BaselineVAE(key=random.PRNGKey(0), latent_size=256)
+model = restore_model(model, 'BaselineVAE_gstep10000.eqx', run_path='dladv-vnca/vnca/runs/h8xyupys')
 
 
 # %%
 # Get the latent samples
-_, z_means = lax.scan(partial(get_latent_sample, model=vnca_model), 0, test_data)
+def get_latent_sample(carry: Any, x: Array, *, model: AutoEncoder) -> Tuple[Any, Array]:
+    mean, _ = model.encoder(x)
+    return carry, mean
+
+_, z_means = lax.scan(partial(get_latent_sample, model=model), 0, test_data)
 
 
 # %%
-# Run t-SNE
+# Take a random subset of the latent samples
+n = 5_000
+indices = np.arange(len(z_means))
+indices = random.permutation(DATA_KEY, indices)
+z_means = z_means[indices][:n]
+test_labels = test_labels[indices][:n]
+
+
+# %%
+# Run t-SNE to reduce the dimensionality of the latent space
 tsne = TSNE(n_components=2)
 z_means_tsne = tsne.fit_transform(z_means)
 
@@ -86,14 +92,14 @@ def show_latent_space(data: Array, labels: Array, n: int = 5_000):
     if n < len(labels):
         indices = np.arange(len(labels))
         indices = random.permutation(DATA_KEY, indices)
-        data = data[indices]
-        labels = labels[indices]
+        data = data[indices][:n]
+        labels = labels[indices][:n]
 
     plt.figure(figsize=(10, 10))
     plt.scatter(
-        data[:n, 0],
-        data[:n, 1],
-        c=labels[:n],
+        data[:, 0],
+        data[:, 1],
+        c=labels,
         cmap='tab10',
         alpha=0.69,
         vmin=np.min(labels) - 0.5,

@@ -1,7 +1,7 @@
 # %%
 from IPython import get_ipython
 
-get_ipython().system('git clone https://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@github.com/albertaillet/vnca.git -b training-pool-nondoubling')
+get_ipython().system('git clone https://github.com/albertaillet/vnca.git')
 
 
 # %%
@@ -66,15 +66,26 @@ LOGGING_KEY = PRNGKey(3)
 
 
 # %%
-model = NonDoublingVNCA(key=MODEL_KEY, latent_size=128)
+@partial(pmap, axis_name='num_devices', static_broadcasted_argnums=(3, 6), out_axes=(None, 0, 0))
+def make_step(data: Array, index: Array, params, static, key: PRNGKeyArray, opt_state: tuple, optim: GradientTransformation) -> Tuple[float, Module, Any]:
+    def step(carry, index):
+        params, opt_state, key = carry
+        x = data[index]
+        key, subkey = split(key)
 
-n_tpus = local_device_count()
-devices = local_devices()
-data, test_data = load_data_on_tpu(devices=local_devices(), dataset='binarized_mnist', key=TEST_KEY)
-n_tpus, devices
+        model = eqx.combine(params, static)
+        loss, grads = eqx.filter_value_and_grad(forward)(model, x, subkey)
+        loss = lax.pmean(loss, axis_name='num_devices')
+        grads = lax.pmean(grads, axis_name='num_devices')
 
+        updates, opt_state = optim.update(grads, opt_state)
+        params = eqx.apply_updates(params, updates)
+        return (params, opt_state, key), loss
 
-# %%
+    (params, opt_state, key), loss = lax.scan(step, (params, opt_state, key), index)
+    return loss, params, opt_state
+
+        
 @partial(pmap, donate_argnums=(1, 2, 4, 5, 7, 8), axis_name='num_devices', static_broadcasted_argnums=(3, 6), out_axes=(None, 0, 0, 0))
 def make_pool_step(
     data: Array, index: Array, params, static, key: PRNGKeyArray, opt_state: tuple, optim: GradientTransformation, t_key: PRNGKeyArray, pool: Tuple[Array, Array]
@@ -163,7 +174,16 @@ def test_iwelbo(x: Array, params, static, key: PRNGKeyArray, K: int, batch_size:
 
 
 # %%
-wandb.init(project='vnca', entity='dladv-vnca', mode='online')
+model = NonDoublingVNCA(key=MODEL_KEY, latent_size=128)
+
+n_tpus = local_device_count()
+devices = local_devices()
+data, test_data = load_data_on_tpu(devices=local_devices(), dataset='binarized_mnist', key=TEST_KEY)
+n_tpus, devices
+
+
+# %%
+wandb.init(project='vnca', entity='dladv-vnca')
 
 wandb.config.model_type = model.__class__.__name__
 wandb.config.latent_size = model.latent_size
@@ -241,7 +261,10 @@ pbar = tqdm(
 
 for i, idx, train_key, test_key, t_key in pbar:
     step_time = time.time()
-    loss, params, opt_state, pool = make_pool_step(data, idx, params, static, train_key, opt_state, opt, t_key, pool)
+    if wandb.config.pool_size is None:
+        loss, params, opt_state = make_step(data, idx, params, static, train_key, opt_state, opt)
+    elif wandb.config.pool_size is not None:
+        loss, params, opt_state, pool = make_pool_step(data, idx, params, static, train_key, opt_state, opt, t_key, pool)
     step_time = time.time() - step_time
 
     n_gradient_steps = i * wandb.config.l

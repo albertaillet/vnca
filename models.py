@@ -1,8 +1,7 @@
-from jax import vmap, checkpoint
-import jax.numpy as np
+from jax import numpy as np
+from jax import lax, vmap, checkpoint
 from jax.random import split, normal, bernoulli, randint
 from jax.nn import elu, sigmoid
-from jax import lax
 
 from einops import rearrange, repeat
 
@@ -13,7 +12,7 @@ from functools import partial
 
 # typing
 from jax import Array
-from typing import Optional, Sequence, Tuple
+from typing import Optional, Sequence, Tuple, Any
 from jax.random import PRNGKeyArray
 
 
@@ -59,17 +58,15 @@ def damage(x: Array, *, key: PRNGKeyArray) -> Array:
     return lax.dynamic_update_slice(x, update, (0, hmask, wmask))
 
 
-Flatten: Lambda = Lambda(flatten)
-
-
 def double(x: Array) -> Array:
     return repeat(x, 'c h w -> c (h 2) (w 2)')
 
 
+Flatten: Lambda = Lambda(flatten)
+
 Sigmoid: Lambda = Lambda(sigmoid)
 
 Double: Lambda = Lambda(double)
-
 
 Elu: Lambda = Lambda(elu)
 
@@ -91,7 +88,7 @@ class Encoder(Sequential):
                 Elu,
                 Flatten,
                 Linear(in_features=2048, out_features=2 * latent_size, key=keys[5]),
-                Lambda(partial(rearrange, pattern='(p l) -> p l', l=latent_size, p=2)),
+                Lambda(partial(rearrange, pattern='(p l) -> p l', p=2, l=latent_size)),
             ]
         )
 
@@ -317,7 +314,7 @@ class NonDoublingVNCA(AutoEncoder):
         false_fun = lambda z: z
 
         @checkpoint
-        def scan_fn(z: Array, t: int) -> Tuple[Array, Array]:
+        def scan_fn(z: Array, t: int) -> Tuple[Array, Any]:
             z = lax.cond(t, true_fun, false_fun, z)
             return z, None
 
@@ -331,10 +328,6 @@ class NonDoublingVNCA(AutoEncoder):
         z = sample_gaussian(mean, logvar, (self.latent_size,), key=key)
         z = repeat(z, 'c -> c h w', h=32, w=32)
 
-        def process(z: Array) -> Array:
-            '''Process a latent sample by taking the image channels, applying sigmoid.'''
-            return sigmoid(z[:n_channels])
-
         # Decode the latent sample and save the processed image channels
         stages_probs = []
         for i in range(T):
@@ -342,6 +335,6 @@ class NonDoublingVNCA(AutoEncoder):
             if i in damage_idx:
                 key, damage_key = split(key)
                 z = damage(z, key=damage_key)
-            stages_probs.append(process(z))
+            stages_probs.append(sigmoid(z[:n_channels]))
 
         return np.array(stages_probs)

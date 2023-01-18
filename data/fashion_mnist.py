@@ -33,8 +33,10 @@ def get_data(binarized: bool, pad: int = 2) -> Tuple[Array, Array]:
     test_data = rearrange(test_data, '(n c) h w -> n c h w', n=10_000, c=1, h=32, w=32).astype(np.float32)
 
     # Normalize the images to [0, 1]
-    train_data = train_data / 255.0
-    test_data = test_data / 255.0
+
+    train_data = train_data / 255.
+    test_data = test_data / 255.
+
     if binarized:
         # Binarize the images using bernoulli sampling
         train_data = bernoulli(BINARIZATION_KEY, p=train_data).astype(np.float32)
