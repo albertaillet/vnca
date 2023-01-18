@@ -56,7 +56,7 @@ def iwae_loss(model, x: Array, K: int, key: PRNGKeyArray) -> Array:
 
     def loss_fn(x: Array, key: PRNGKeyArray):
 
-        x_rec, z, mean, logvar = model(x, K, key=key)
+        x_rec, z, mean, logvar = model(x, key=key, M=K)
 
         def log_importance_weight(x_rec, z):
             # Compute importance weights
