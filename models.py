@@ -181,7 +181,7 @@ class NCAStepSimple(Sequential):
 class AutoEncoder(Module):
     latent_size: int
 
-    def __call__(self, x: Array, *, key: PRNGKeyArray, M: int = 1) -> Tuple[Array, Array, Array]:
+    def __call__(self, x: Array, *, key: PRNGKeyArray, M: int = 1) -> Tuple[Array, Array, Array, Array]:
         # get parameters for the latent distribution
         mean, logvar = self.encoder(x)
 
@@ -194,7 +194,7 @@ class AutoEncoder(Module):
         # vmap over the M samples and crop the images to the original size
         x_hat = vmap(partial(crop, shape=x.shape))(x_hat)
 
-        return x_hat, mean, logvar
+        return x_hat, z, mean, logvar
 
     def encoder(self, x: Array) -> Array:
         raise NotImplementedError

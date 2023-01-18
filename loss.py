@@ -1,8 +1,8 @@
 import jax.numpy as np
+from jax import vmap
 from jax.random import split
 from jax.scipy.special import logsumexp
 from distrax import Normal, Bernoulli
-import equinox as eqx
 from equinox import filter_vmap
 from einops import reduce, repeat
 
@@ -17,12 +17,12 @@ def forward(model: Module, x: Array, key: PRNGKeyArray, M: int = 1, beta: int = 
     keys = split(key, x.shape[0])
 
     # Vmap over the batch, we need filter since model is a Module
-    recon_x, mean, logvar = filter_vmap(model)(x, key=keys, M=M)
+    recon_x, _, mean, logvar = filter_vmap(model)(x, key=keys, M=M)
 
-    return iwelbo_loss(recon_x, x, mean, logvar, M, beta=beta)
+    return vae_loss(recon_x, x, mean, logvar, M, beta=beta)
 
 
-def iwelbo_loss(recon_x: Array, x: Array, mean: Array, logvar: Array, M: int = 1, beta: int = 1) -> float:
+def vae_loss(recon_x: Array, x: Array, mean: Array, logvar: Array, M: int = 1, beta: int = 1) -> float:
     '''Compute the IWELBO loss.'''
 
     # Posterior p_{\theta}(z|x)
@@ -49,3 +49,27 @@ def iwelbo_loss(recon_x: Array, x: Array, mean: Array, logvar: Array, M: int = 1
 
     # Mean over the batch
     return -np.mean(iw_loss)
+
+
+def iwae_loss(model, x: Array, K: int, key: PRNGKeyArray) -> Array:
+    '''Compute the IWELBO loss.'''
+
+    def loss_fn(x: Array, key: PRNGKeyArray):
+
+        x_rec, z, mean, logvar = model(x, key=key, M=K)
+
+        def log_importance_weight(x_rec, z):
+            # Compute importance weights
+            log_q_z_x = reduce(Normal(mean, np.exp(1 / 2 * logvar)).log_prob(z), 'l -> ', 'sum')
+            log_p_z = reduce(Normal(np.zeros_like(mean), np.ones_like(logvar)).log_prob(z), 'l -> ', 'sum')
+            log_p_x_z = reduce(Bernoulli(logits=x_rec).log_prob(x), 'c h w -> ', 'sum')
+            return log_p_x_z + log_p_z - log_q_z_x
+
+        # Compute the log importance weights for each sample
+        log_iw = vmap(log_importance_weight)(x_rec, z)
+        # Marginalize log likelihood
+        return reduce(log_iw, 'k -> ', logsumexp) - np.log(K)
+
+    keys = split(key, x.shape[0])
+    # Mean over the batch
+    return -np.mean(vmap(loss_fn)(x, keys))
