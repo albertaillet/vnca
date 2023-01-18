@@ -47,7 +47,7 @@ from einops import rearrange, repeat
 from optax import adam, clip_by_global_norm, chain
 
 from data import load_data_on_tpu, indicies_tpu_iterator
-from loss import forward, iwelbo_loss
+from loss import forward, vae_loss, iwae_loss
 from models import AutoEncoder, BaselineVAE, DoublingVNCA, NonDoublingVNCA, sample_gaussian, crop, damage
 from log_utils import save_model, restore_model, to_wandb_img, log_center, log_samples, log_reconstructions, log_growth_stages, log_nca_stages
 
@@ -101,9 +101,9 @@ def make_pool_step(
         z_pool_samples = z_pool_samples.at[:n_half_pool_samples].set(damaged_half)
 
         @partial(eqx.filter_value_and_grad, has_aux=True)
-        def forward(model: NonDoublingVNCA, x: Array, z_pool_samples: Array, *, key: PRNGKeyArray, t_key: PRNGKeyArray) -> Tuple[Array, Array]:
+        def forward(model: NonDoublingVNCA, x: Array, z_pool_samples: Array, *, key: PRNGKeyArray, t_key: PRNGKeyArray) -> Tuple[float, Tuple[Array, Array]]:
 
-            # encode x and get parameters of latent distribution, sample z_0 and repeat to (pool_size, z_dim, h, w) 
+            # encode x and get parameters of latent distribution, sample z_0 and repeat to (pool_size, z_dim, h, w)
             mean, logvar = vmap(model.encoder, out_axes=1)(x)
             z_0 = sample_gaussian(mean, logvar, mean.shape, key=key)  # (batch_size, z_dim)
             z_0 = repeat(z_0, 'b c -> b c h w', h=32, w=32)
@@ -122,7 +122,7 @@ def make_pool_step(
             recon_x_M = repeat(recon_x, 'b c h w -> b m c h w', m=1)
 
             # get loss
-            loss = iwelbo_loss(recon_x_M, x, mean, logvar, M=1)
+            loss = vae_loss(recon_x_M, x, mean, logvar, M=1)
 
             return loss, (x, z_T)
 
@@ -142,7 +142,7 @@ def make_pool_step(
 
         updates, opt_state = optim.update(grads, opt_state)
         params = eqx.apply_updates(params, updates)
-        
+
         return (params, opt_state, next_key, next_t_key, pool), loss
 
     (params, opt_state, key, t_key, pool), loss = lax.scan(step, (params, opt_state, key, t_key, pool), index)
@@ -150,11 +150,11 @@ def make_pool_step(
 
 
 @partial(pmap, axis_name='num_devices', static_broadcasted_argnums=(2, 4, 5))
-def test_iwelbo(x: Array, params, static, key: PRNGKeyArray, M: int, batch_size: int):
+def test_iwelbo(x: Array, params, static, key: PRNGKeyArray, K: int, batch_size: int):
     model = eqx.combine(params, static)
     key, subkey = split(key)
     indices = randint(key, (batch_size,), 0, len(x))
-    loss = forward(model, x[indices], subkey, M=M)
+    loss = iwae_loss(model, x[indices], key=subkey, K=K)
     return lax.pmean(loss, axis_name='num_devices')
 
 
