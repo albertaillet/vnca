@@ -9,7 +9,7 @@ from log_utils import to_grid, to_PIL_img
 
 # %%
 # Load the model
-vnca_model = NonDoublingVNCA(latent_size=256, key=random.PRNGKey(0))
+vnca_model = NonDoublingVNCA(latent_size=128, key=random.PRNGKey(0))
 vnca_model: NonDoublingVNCA = tree_deserialise_leaves('models/NonDoublingVNCA_gstep100000.eqx', vnca_model)
 
 
@@ -18,7 +18,7 @@ vnca_model: NonDoublingVNCA = tree_deserialise_leaves('models/NonDoublingVNCA_gs
 ih, iw = 10, 10
 T = ih * iw
 damage_idx = {50}
-key = random.PRNGKey(17)
+key = random.PRNGKey(1)
 out = vnca_model.nca_stages(n_channels=1, T=T, damage_idx=damage_idx, key=key)
 
 
@@ -34,7 +34,7 @@ damage_idx = {36}
 original = []
 damaged = []
 recovered = []
-key = random.PRNGKey(1)
+key = random.PRNGKey(0)
 keys = random.split(key, num=10)
 for key in keys:
     out = vnca_model.nca_stages(n_channels=1, T=T, damage_idx=damage_idx, key=key)
