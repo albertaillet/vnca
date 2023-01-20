@@ -22,6 +22,10 @@ def get_data(dataset: str = 'binarized_mnist', *args, **kwargs) -> Tuple[Array, 
         import data.fashion_mnist as fashion_mnist
 
         return fashion_mnist.get_data(binarized=True, *args, **kwargs)
+    elif dataset == 'celebA':
+        import data.celebA as celebA
+
+        return celebA.get_data(*args, **kwargs)
     else:
         raise ValueError(f'Unknown dataset {dataset}')
 
