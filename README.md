@@ -1,6 +1,6 @@
 # Re-implementation of Variational Neural Cellular Automata
 
-The repository contains code for the reproduction of the results from "Variational Neural Cellular Automata" [1] for the course [DD2412 Deep Learning, Advanced. KTH (Royal Institute of Technology), Stockholm, Sweden](https://www.kth.se/student/kurser/kurs/DD2412?l=en).
+The repository contains code for the reproduction of the results from "Variational Neural Cellular Automata" [1]. 
 
 The autograd engine [JAX](https://github.com/google/jax), the neural network library [equinox](https://github.com/patrick-kidger/equinox), the optimization library [optax](https://github.com/deepmind/optax) and the tensor operation library [einops](https://github.com/arogozhnikov/einops) are used.
 
@@ -43,9 +43,9 @@ Our model achieves the following performance on :
 
 | Model name         | ELBO evaluated on the test set using 128 importance weighted samples. |
 | --------------- |----------- |
-| BaselineVAE     | -83.88 nats  |
-| DoublingVNCA    | -83.56 nats  |
-| NonDoublingVNCA | -87.92 nats |
+| BaselineVAE     | -84.64 nats  |
+| DoublingVNCA    | -84.15 nats  |
+| NonDoublingVNCA | -89.3 nats |
 
 <!-- 📋  Include a table of results from your paper, and link back to the leaderboard for clarity and context. If your main result is a figure, include that figure and link to the command or notebook to reproduce it.--> 
 
@@ -69,7 +69,6 @@ To run a few tests that test the model output shape and the doubling operation, 
 ```pytonn
 pytest tests.py
 ```
-
 
 ## References
 
