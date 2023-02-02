@@ -13,7 +13,7 @@ vnca_model = restore_model(vnca_model, 'NonDoublingVNCA_gstep100000.eqx', run_pa
 
 
 # %%
-# Generate 100 steps and damage the 50th
+# Generate 80 steps and damage the 40th
 ih, iw = 10, 8
 T = ih * iw
 damage_idx = {T // 2}

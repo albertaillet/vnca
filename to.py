@@ -1,4 +1,4 @@
-# Usage: to_py.sh notebook_name.ipynb new_python_file_name.py
+# Usage: to.py notebook_name.ipynb new_python_file_name.py
 import re
 import argparse
 import nbconvert

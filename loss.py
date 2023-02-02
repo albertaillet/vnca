@@ -23,7 +23,7 @@ def forward(model: Module, x: Array, key: PRNGKeyArray, M: int = 1, beta: int = 
 
 
 def vae_loss(recon_x: Array, x: Array, mean: Array, logvar: Array, M: int = 1, beta: int = 1) -> float:
-    '''Compute the IWELBO loss.'''
+    '''Compute the ELBO loss.'''
 
     # Posterior p_{\theta}(z|x)
     post = Normal(np.zeros_like(mean), np.ones_like(logvar))
@@ -54,11 +54,11 @@ def vae_loss(recon_x: Array, x: Array, mean: Array, logvar: Array, M: int = 1, b
 def iwae_loss(model, x: Array, K: int, key: PRNGKeyArray) -> Array:
     '''Compute the IWELBO loss.'''
 
-    def loss_fn(x: Array, key: PRNGKeyArray):
+    def loss_fn(x: Array, key: PRNGKeyArray) -> Array:
 
         x_rec, z, mean, logvar = model(x, key=key, M=K)
 
-        def log_importance_weight(x_rec, z):
+        def log_importance_weight(x_rec: Array, z: Array) -> Array:
             # Compute importance weights
             log_q_z_x = reduce(Normal(mean, np.exp(1 / 2 * logvar)).log_prob(z), 'l -> ', 'sum')
             log_p_z = reduce(Normal(np.zeros_like(mean), np.ones_like(logvar)).log_prob(z), 'l -> ', 'sum')
