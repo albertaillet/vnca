@@ -41,7 +41,7 @@ Our model achieves the following performance on :
 
 ### [Image Generation on Binarized MNIST](https://paperswithcode.com/sota/image-generation-on-binarized-mnist)
 
-| Model name         | ELBO evaluated on the test set using 128 importance weighted samples. |
+| Model name         | IWELBO evaluated on the test set using 128 importance weighted samples. |
 | --------------- |----------- |
 | BaselineVAE     | -84.64 nats  |
 | DoublingVNCA    | -84.15 nats  |
