@@ -1,20 +1,23 @@
 # %%
 # Imports
 import equinox as eqx
-from data import get_data
-from jax.random import PRNGKey, PRNGKeyArray, split
+import jax.numpy as np
+from numpy import uint8
+from jax import Array, vmap, jit
+from jax.random import PRNGKey, PRNGKeyArray, split, normal
 from jax.nn import sigmoid
-from jax import Array, jit
 from models import AutoEncoder, BaselineVAE, DoublingVNCA, sample_gaussian, pad, double
 from einops import rearrange
+from IPython.display import Image
+from tqdm import tqdm
+from PIL import Image as PILImage
 from functools import partial
 
+def to_PIL_img(x: np.ndarray) -> PILImage:
+    '''Converts an array of shape (c, h, w) to a PIL Image'''
+    x = np.clip(x, 0, 1)
+    return PILImage.fromarray(uint8(255 * x).squeeze())
 SAMPLE_KEY = PRNGKey(0)
-
-
-# %%
-# Load the test set
-_, test_data = get_data(dataset='binarized_mnist')
 
 
 # %%
@@ -59,22 +62,36 @@ stages = np.array([growth_stages(vnca_model, key=key) for key in keys])
 
 
 # %%
-stages = rearrange(stages, '(ih iw) t c h w -> t c (ih h) (iw w)', ih=ih, iw=iw)
+stages_rearranged = rearrange(stages, '(ih iw) t c h w -> t c (ih h) (iw w)', ih=ih, iw=iw, c=1, h=32, w=32)
+images = [to_PIL_img(s) for s in stages_rearranged]
+images[0].save('vnca_stages.gif', save_all=True, append_images=images[1:], duration=100, loop=0)
+Image(open('vnca_stages.gif','rb').read())
 
 # %%
-# make a gif:
-import numpy as np
-from PIL import Image
+# Interpolate between two random latent vectors and plot
+def get_interpolation(n: int, *, key: PRNGKeyArray) -> Array:
+    z_1, z_2 = normal(key, (2, 256))  # Sample two latent vectors
+    d = (z_2 - z_1) / n
+    interpolate = lambda i: z_1 + i * d
 
-def to_PIL_img(x: np.ndarray) -> Image:
-    '''Converts an array of shape (c, h, w) to a PIL Image'''
-    x = np.clip(x, 0, 1)
-    return Image.fromarray(np.array(255 * x, dtype=np.uint8).squeeze())
-
-images = [to_PIL_img(stage) for stage in stages]
+    z = vmap(interpolate)(np.arange(n))  # Interpolate the latent vectors
+    logits = vmap(vnca_model.decoder)(z)  # Decode
+    logits = logits[:, :1]  # Take the image channels
+    probs = sigmoid(logits)  # Sigmoid to get pixel values
+    return probs
 
 
 # %%
-# make the gif that loops forever
-images[0].save('vnca.gif', save_all=True, append_images=images[1:], duration=100, loop=0)
+ih, iw, n = 5, 10, 10
+keys = split(SAMPLE_KEY, ih * iw)
+interpolate = jit(partial(get_interpolation, n=n))
+interpolations = np.array([interpolate(key=key) for key in tqdm(keys)])
+
+# %%
+# make it loop back and forth
+interpolations_rearranged = rearrange(interpolations, '(ih iw) n c h w -> n c (ih h) (iw w)', ih=ih, iw=iw, n=n, c=1, h=32, w=32)
+images = [to_PIL_img(i) for i in interpolations_rearranged]
+images[0].save('vnca_interpolation.gif', save_all=True, append_images=images[1:] + images[::-1], duration=100, loop=0)
+Image(open('vnca_interpolation.gif','rb').read())
+
 # %%
