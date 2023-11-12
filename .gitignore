@@ -6,3 +6,4 @@ sandbox.*
 *.ipynb
 *.eqx
 latent_interpolate/
+venv/
