@@ -11,7 +11,6 @@ from models import AutoEncoder, DoublingVNCA, NonDoublingVNCA
 
 # typing
 from jax import Array
-from jax.random import PRNGKeyArray
 
 
 def save_model(model, step):
@@ -52,7 +51,7 @@ def log_center(model: AutoEncoder) -> Array:
 
 
 @eqx.filter_jit
-def log_samples(model: AutoEncoder, ih: int = 4, iw: int = 8, *, key: PRNGKeyArray) -> Array:
+def log_samples(model: AutoEncoder, ih: int = 4, iw: int = 8, *, key: Array) -> Array:
     '''Returns a grid of samples from the model'''
     keys = split(key, ih * iw)
     samples = vmap(model.sample)(key=keys)
@@ -61,7 +60,7 @@ def log_samples(model: AutoEncoder, ih: int = 4, iw: int = 8, *, key: PRNGKeyArr
 
 
 @eqx.filter_jit
-def log_reconstructions(model: AutoEncoder, data: Array, ih: int = 4, iw: int = 8, *, key: PRNGKeyArray) -> Array:
+def log_reconstructions(model: AutoEncoder, data: Array, ih: int = 4, iw: int = 8, *, key: Array) -> Array:
     '''Returns a grid of reconstructions from the model'''
     idx = randint(key, (ih * iw,), 0, len(data))
     keys = split(key, ih * iw)
@@ -73,14 +72,14 @@ def log_reconstructions(model: AutoEncoder, data: Array, ih: int = 4, iw: int = 
 
 
 @eqx.filter_jit
-def log_growth_stages(model: DoublingVNCA, *, key: PRNGKeyArray) -> Array:
+def log_growth_stages(model: DoublingVNCA, *, key: Array) -> Array:
     '''Returns a grid of growth stages from the DoublingVNCA model'''
     stages = model.growth_stages(key=key)
     return to_grid(stages, ih=model.K, iw=model.N_nca_steps + 1)
 
 
 @eqx.filter_jit
-def log_nca_stages(model: NonDoublingVNCA, ih: int = 4, iw: int = 9, *, key: PRNGKeyArray) -> Array:
+def log_nca_stages(model: NonDoublingVNCA, ih: int = 4, iw: int = 9, *, key: Array) -> Array:
     '''Returns a grid of NCA stages from the NonDoublingVNCA model'''
     stages = model.nca_stages(T=ih * iw, key=key)
     return to_grid(stages, ih=ih, iw=iw)

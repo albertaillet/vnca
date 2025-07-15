@@ -8,11 +8,10 @@ from einops import reduce, repeat
 
 # Typing
 from jax import Array
-from jax.random import PRNGKeyArray
 from equinox import Module
 
 
-def forward(model: Module, x: Array, key: PRNGKeyArray, M: int = 1, beta: int = 1) -> float:
+def forward(model: Module, x: Array, key: Array, M: int = 1, beta: int = 1) -> float:
     # Split the key to have one for each sample
     keys = split(key, x.shape[0])
 
@@ -51,10 +50,10 @@ def vae_loss(recon_x: Array, x: Array, mean: Array, logvar: Array, M: int = 1, b
     return -np.mean(iw_loss)
 
 
-def iwae_loss(model, x: Array, K: int, key: PRNGKeyArray) -> Array:
+def iwae_loss(model, x: Array, K: int, key: Array) -> Array:
     '''Compute the IWELBO loss.'''
 
-    def loss_fn(x: Array, key: PRNGKeyArray) -> Array:
+    def loss_fn(x: Array, key: Array) -> Array:
 
         x_rec, z, mean, logvar = model(x, key=key, M=K)
 

@@ -55,7 +55,6 @@ from log_utils import save_model, restore_model, to_wandb_img, log_center, log_s
 from jax import Array
 from equinox import Module
 from typing import Any
-from jax.random import PRNGKeyArray
 from optax import GradientTransformation
 from typing import Tuple
 
@@ -67,7 +66,7 @@ LOGGING_KEY = PRNGKey(3)
 
 # %%
 @partial(pmap, axis_name='num_devices', static_broadcasted_argnums=(3, 6), out_axes=(None, 0, 0))
-def make_step(data: Array, index: Array, params, static, key: PRNGKeyArray, opt_state: tuple, optim: GradientTransformation) -> Tuple[float, Module, Any]:
+def make_step(data: Array, index: Array, params, static, key: Array, opt_state: tuple, optim: GradientTransformation) -> Tuple[float, Module, Any]:
     def step(carry, index):
         params, opt_state, key = carry
         x = data[index]
@@ -88,7 +87,7 @@ def make_step(data: Array, index: Array, params, static, key: PRNGKeyArray, opt_
         
 @partial(pmap, donate_argnums=(1, 2, 4, 5, 7, 8), axis_name='num_devices', static_broadcasted_argnums=(3, 6), out_axes=(None, 0, 0, 0))
 def make_pool_step(
-    data: Array, index: Array, params, static, key: PRNGKeyArray, opt_state: tuple, optim: GradientTransformation, t_key: PRNGKeyArray, pool: Tuple[Array, Array]
+    data: Array, index: Array, params, static, key: Array, opt_state: tuple, optim: GradientTransformation, t_key: Array, pool: Tuple[Array, Array]
 ) -> Tuple[float, Module, Any]:
     batch_size = index.shape[1]
     n_pool_samples = batch_size // 2
@@ -114,7 +113,7 @@ def make_pool_step(
         z_pool_samples = z_pool_samples.at[:n_half_pool_samples].set(damaged_half)
 
         @partial(eqx.filter_value_and_grad, has_aux=True)
-        def forward(model: NonDoublingVNCA, x: Array, z_pool_samples: Array, *, key: PRNGKeyArray, t_key: PRNGKeyArray) -> Tuple[float, Tuple[Array, Array]]:
+        def forward(model: NonDoublingVNCA, x: Array, z_pool_samples: Array, *, key: Array, t_key: Array) -> Tuple[float, Tuple[Array, Array]]:
 
             # encode x and get parameters of latent distribution, sample z_0 and repeat to (pool_size, z_dim, h, w)
             mean, logvar = vmap(model.encoder, out_axes=1)(x)
@@ -165,7 +164,7 @@ def make_pool_step(
 
 
 @partial(pmap, axis_name='num_devices', static_broadcasted_argnums=(2, 4, 5))
-def test_iwelbo(x: Array, params, static, key: PRNGKeyArray, K: int, batch_size: int):
+def test_iwelbo(x: Array, params, static, key: Array, K: int, batch_size: int):
     model = eqx.combine(params, static)
     key, subkey = split(key)
     indices = randint(key, (batch_size,), 0, len(x))

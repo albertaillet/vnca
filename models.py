@@ -13,16 +13,15 @@ from functools import partial
 # typing
 from jax import Array
 from typing import Optional, Sequence, Tuple, Any
-from jax.random import PRNGKeyArray
+    
 
-
-def sample_gaussian(mu: Array, logvar: Array, shape: Sequence[int], *, key: PRNGKeyArray) -> Array:
+def sample_gaussian(mu: Array, logvar: Array, shape: Sequence[int], *, key: Array) -> Array:
     std: Array = np.exp(0.5 * logvar)
     # use the reparameterization trick
     return mu + std * normal(key=key, shape=shape)
 
 
-def sample_bernoulli(logits: Array, shape: Sequence[int], *, key: PRNGKeyArray) -> Array:
+def sample_bernoulli(logits: Array, shape: Sequence[int], *, key: Array) -> Array:
     p = sigmoid(logits)
     return bernoulli(key=key, p=p, shape=shape)
 
@@ -44,7 +43,7 @@ def flatten(x: Array) -> Array:
     return rearrange(x, 'c h w -> (c h w)')
 
 
-def damage(x: Array, *, key: PRNGKeyArray) -> Array:
+def damage(x: Array, *, key: Array) -> Array:
     '''Set the cell states of a H//2 x W//2 square to zero.'''
     l, h, w = x.shape
     h_half, w_half = h // 2, w // 2
@@ -72,7 +71,7 @@ Elu: Lambda = Lambda(elu)
 
 
 class Encoder(Sequential):
-    def __init__(self, latent_size: int, *, key: PRNGKeyArray):
+    def __init__(self, latent_size: int, *, key: Array):
         keys = split(key, 6)
         super().__init__(
             [
@@ -94,12 +93,12 @@ class Encoder(Sequential):
 
 
 class LinearDecoder(Linear):
-    def __init__(self, latent_size: int, *, key: PRNGKeyArray):
+    def __init__(self, latent_size: int, *, key: Array):
         super().__init__(in_features=latent_size, out_features=2048, key=key)
 
 
 class ConvolutionalDecoder(Sequential):
-    def __init__(self, *, key: PRNGKeyArray):
+    def __init__(self, *, key: Array):
         keys = split(key, 5)
         super().__init__(
             [
@@ -117,7 +116,7 @@ class ConvolutionalDecoder(Sequential):
 
 
 class BaselineDecoder(Sequential):
-    def __init__(self, latent_size: int, *, key: PRNGKeyArray):
+    def __init__(self, latent_size: int, *, key: Array):
         key1, key2 = split(key, 2)
         super().__init__(
             [
@@ -130,7 +129,7 @@ class BaselineDecoder(Sequential):
 
 
 class Residual(Sequential):
-    def __init__(self, latent_size: int, *, key: PRNGKeyArray) -> None:
+    def __init__(self, latent_size: int, *, key: Array) -> None:
         key1, key2 = split(key, 2)
         super().__init__(
             [
@@ -140,7 +139,7 @@ class Residual(Sequential):
             ]
         )
 
-    def __call__(self, x: Array, *, key: Optional[PRNGKeyArray] = None) -> Array:
+    def __call__(self, x: Array, *, key: Optional[Array] = None) -> Array:
         return x + super().__call__(x, key=key)
 
 
@@ -152,7 +151,7 @@ class Conv2dZeroInit(Conv2d):
 
 
 class NCAStep(Sequential):
-    def __init__(self, latent_size: int, *, key: PRNGKeyArray) -> None:
+    def __init__(self, latent_size: int, *, key: Array) -> None:
         keys = split(key, 6)
         super().__init__(
             [
@@ -167,7 +166,7 @@ class NCAStep(Sequential):
 
 
 class NCAStepSimple(Sequential):
-    def __init__(self, latent_size: int, *, key: PRNGKeyArray) -> None:
+    def __init__(self, latent_size: int, *, key: Array) -> None:
         key1, key2 = split(key)
         super().__init__(
             [
@@ -181,7 +180,7 @@ class NCAStepSimple(Sequential):
 class AutoEncoder(Module):
     latent_size: int
 
-    def __call__(self, x: Array, *, key: PRNGKeyArray, M: int = 1) -> Tuple[Array, Array, Array, Array]:
+    def __call__(self, x: Array, *, key: Array, M: int = 1) -> Tuple[Array, Array, Array, Array]:
         # get parameters for the latent distribution
         mean, logvar = self.encoder(x)
 
@@ -206,7 +205,7 @@ class AutoEncoder(Module):
         z_center = np.zeros((self.latent_size))
         return self.decoder(z_center)
 
-    def sample(self, *, key: PRNGKeyArray) -> Array:
+    def sample(self, *, key: Array) -> Array:
         mean = np.zeros(self.latent_size)
         logvar = np.zeros(self.latent_size)
         z = sample_gaussian(mean, logvar, shape=(self.latent_size,), key=key)
@@ -218,7 +217,7 @@ class BaselineVAE(AutoEncoder):
     decoder: Sequential
     latent_size: int
 
-    def __init__(self, latent_size: int = 256, *, key: PRNGKeyArray) -> None:
+    def __init__(self, latent_size: int = 256, *, key: Array) -> None:
         key1, key2 = split(key, 2)
         self.latent_size = latent_size
         self.encoder = Encoder(latent_size=latent_size, key=key1)
@@ -233,7 +232,7 @@ class DoublingVNCA(AutoEncoder):
     K: int
     N_nca_steps: int
 
-    def __init__(self, latent_size: int = 256, K: int = 5, N_nca_steps: int = 8, *, key: PRNGKeyArray) -> None:
+    def __init__(self, latent_size: int = 256, K: int = 5, N_nca_steps: int = 8, *, key: Array) -> None:
         key1, key2 = split(key)
         self.latent_size = latent_size
         self.encoder = Encoder(latent_size=latent_size, key=key1)
@@ -253,7 +252,7 @@ class DoublingVNCA(AutoEncoder):
                 z = z + self.step(z)
         return z
 
-    def growth_stages(self, n_channels: int = 1, *, key: PRNGKeyArray) -> Array:
+    def growth_stages(self, n_channels: int = 1, *, key: Array) -> Array:
         mean = np.zeros(self.latent_size)
         logvar = np.zeros(self.latent_size)
         z = sample_gaussian(mean, logvar, (self.latent_size,), key=key)
@@ -288,7 +287,7 @@ class NonDoublingVNCA(AutoEncoder):
     N_nca_steps_min: int
     N_nca_steps_max: int
 
-    def __init__(self, latent_size: int = 256, N_nca_steps: int = 36, N_nca_steps_min: int = 32, N_nca_steps_max: int = 64, *, key: PRNGKeyArray) -> None:
+    def __init__(self, latent_size: int = 256, N_nca_steps: int = 36, N_nca_steps_min: int = 32, N_nca_steps_max: int = 64, *, key: Array) -> None:
         key1, key2 = split(key)
         self.encoder = Encoder(latent_size=latent_size, key=key1)
         self.step = NCAStepSimple(latent_size=latent_size, key=key2)
@@ -304,7 +303,7 @@ class NonDoublingVNCA(AutoEncoder):
         # decode the latent sample by applying the NCA steps
         return self.decode_grid(z, T=self.N_nca_steps)
 
-    def decode_grid_random(self, z: Array, *, key: PRNGKeyArray) -> Array:
+    def decode_grid_random(self, z: Array, *, key: Array) -> Array:
         T = randint(key, shape=(1,), minval=self.N_nca_steps_min, maxval=self.N_nca_steps_max)
         return self.decode_grid(z, T=T)
 
@@ -322,7 +321,7 @@ class NonDoublingVNCA(AutoEncoder):
 
         return z
 
-    def nca_stages(self, n_channels: int = 1, T: int = 36, damage_idx: set = set(), *, key: PRNGKeyArray) -> Array:
+    def nca_stages(self, n_channels: int = 1, T: int = 36, damage_idx: set = set(), *, key: Array) -> Array:
         mean = np.zeros(self.latent_size)
         logvar = np.zeros(self.latent_size)
         z = sample_gaussian(mean, logvar, (self.latent_size,), key=key)

@@ -48,7 +48,6 @@ from log_utils import restore_model
 
 # typing
 from jax import Array
-from jax.random import PRNGKeyArray
 
 MODEL_KEY = PRNGKey(0)
 TEST_KEY = PRNGKey(2)
@@ -59,7 +58,7 @@ BATCH_SIZE = 8
 # %%
 # function to compute the IWELBO loss on the test set
 @partial(eqx.filter_pmap, axis_name='nd', args=(0, None, None, None))
-def test_iwelbo(batched_data: Array, model: AutoEncoder, key: PRNGKeyArray, K: int):
+def test_iwelbo(batched_data: Array, model: AutoEncoder, key: Array, K: int):
     return lax.pmean(lax.map(partial(iwae_loss, model, key=TEST_KEY, K=K), batched_data).mean(), 'nd')
 
 

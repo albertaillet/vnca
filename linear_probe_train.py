@@ -17,7 +17,7 @@ import jax
 from jax import jit, vmap
 from jax.lax import scan
 from jax import numpy as np
-from jax.random import PRNGKey, split, permutation, PRNGKeyArray, randint
+from jax.random import PRNGKey, split, permutation, randint
 import equinox as eqx
 from einops import repeat, rearrange
 import optax
@@ -138,13 +138,13 @@ def loss_fn(model, x, labels):
     return np.mean(optax.softmax_cross_entropy_with_integer_labels(vmap(model)(x), labels))
 
 
-def get_indices(n: int, batch_size: int, key: PRNGKeyArray) -> Array:
+def get_indices(n: int, batch_size: int, key: Array) -> Array:
     '''Get random indices for a batch.'''
     return randint(key, (batch_size,), 0, n)
 
 
 def generator(dataset, labels, key):
-    def dataset_iterator(batch_size: int, key: PRNGKeyArray):
+    def dataset_iterator(batch_size: int, key: Array):
         n = len(dataset)
         while True:
             key, subkey = split(key)
