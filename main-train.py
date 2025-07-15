@@ -84,7 +84,7 @@ def make_step(data: Array, index: Array, params, static, key: Array, opt_state: 
     (params, opt_state, key), loss = lax.scan(step, (params, opt_state, key), index)
     return loss, params, opt_state
 
-        
+
 @partial(pmap, donate_argnums=(1, 2, 4, 5, 7, 8), axis_name='num_devices', static_broadcasted_argnums=(3, 6), out_axes=(None, 0, 0, 0))
 def make_pool_step(
     data: Array, index: Array, params, static, key: Array, opt_state: tuple, optim: GradientTransformation, t_key: Array, pool: Tuple[Array, Array]

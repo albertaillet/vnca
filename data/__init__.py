@@ -42,7 +42,7 @@ def load_data(batch_size: int, dataset: str = 'binarized_mnist', *, key: Array) 
         n = len(dataset)
         while True:
             key, subkey = split(key)
-            indices = get_indices(n, batch_size, subkey),
+            indices = get_indices(n, batch_size, subkey)
             for batch_indices in rearrange(indices, '(n b) -> n b', b=batch_size):  # reshape into (n_batches, batch_size)
                 yield dataset[batch_indices]
 

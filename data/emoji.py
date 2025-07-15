@@ -1,4 +1,3 @@
-#%%
 import requests
 import jax.numpy as np
 from io import BytesIO

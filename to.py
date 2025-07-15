@@ -12,7 +12,7 @@ parser.add_argument('notebook', type=str, help='path to the notebook', default='
 # second positional argument is the path to the output file
 parser.add_argument('output', type=str, help='path to the output file', default='main-train.py')
 
-# args = ['notebook_name.ipynb', 'new_python_file_name.py']  
+# args = ['notebook_name.ipynb', 'new_python_file_name.py']
 args = parser.parse_args()
 
 # convert notebook to python script string

@@ -35,14 +35,7 @@ ax = fig.add_subplot(111, projection='3d')
 for i in range(7):
     im = rearrange(x[i], 'h w -> w h')
     cmap = cm.gray if i == 0 else cm.bone
-    ax.plot_surface(
-        H, 
-        W, 
-        Z - i * 0.2, 
-        rstride=1, 
-        cstride=1, 
-        facecolors=cmap(im)
-    )
+    ax.plot_surface(H, W, Z - i * 0.2, rstride=1, cstride=1, facecolors=cmap(im))
     ax.axis('off')
 ax.view_init(azim=25)
 plt.show()

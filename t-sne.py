@@ -68,6 +68,7 @@ def get_latent_sample(carry: Any, x: Array, *, model: AutoEncoder) -> Tuple[Any,
     mean, _ = model.encoder(x)
     return carry, mean
 
+
 _, z_means = lax.scan(partial(get_latent_sample, model=model), 0, test_data)
 
 
@@ -111,9 +112,8 @@ def show_latent_space(data: Array, labels: Array, n: int = 5_000):
     plt.axis('off')
     plt.show()
 
+
 show_latent_space(z_means_tsne, test_labels, n=5_000)
 
 
 # %%
-
-

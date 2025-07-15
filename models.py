@@ -13,7 +13,7 @@ from functools import partial
 # typing
 from jax import Array
 from typing import Optional, Sequence, Tuple, Any
-    
+
 
 def sample_gaussian(mu: Array, logvar: Array, shape: Sequence[int], *, key: Array) -> Array:
     std: Array = np.exp(0.5 * logvar)

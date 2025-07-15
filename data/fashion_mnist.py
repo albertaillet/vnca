@@ -34,8 +34,8 @@ def get_data(binarized: bool, pad: int = 2) -> Tuple[Array, Array]:
 
     # Normalize the images to [0, 1]
 
-    train_data = train_data / 255.
-    test_data = test_data / 255.
+    train_data = train_data / 255.0
+    test_data = test_data / 255.0
 
     if binarized:
         # Binarize the images using bernoulli sampling
