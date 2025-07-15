@@ -1,7 +1,7 @@
 [project]
 name = "vnca"
 version = "0.1.0"
-description = "Add your description here"
+description = "Re-implementation of Variational Neural Cellular Automata in JAX."
 readme = "README.md"
 requires-python = "~=3.12"
 dependencies = [
@@ -24,8 +24,14 @@ dependencies = [
     "tensorflow-probability>=0.25.0",
     "tqdm>=4.67.1",
     "wandb>=0.21.0",
-    "black"
 ]
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
 
 [tool.black]
 line-length = 170

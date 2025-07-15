@@ -13,7 +13,7 @@ The results using the binarized MNIST dataset [2] are the main points of the pap
 To install requirements locally, run the following command:
 
 ```setup
-pip install -r requirements.txt
+pip install -e .
 ```
 
 ## Training
