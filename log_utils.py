@@ -32,7 +32,7 @@ def to_wandb_img(x: Array) -> wandb.Image:
     return wandb.Image(to_PIL_img(x))
 
 
-def to_PIL_img(x: Array) -> Image:
+def to_PIL_img(x: Array) -> Image.Image:
     '''Converts an array of shape (c, h, w) to a PIL Image'''
     x = np.clip(x, 0, 1)
     return Image.fromarray(np.array(255 * x, dtype=np.uint8)[0])

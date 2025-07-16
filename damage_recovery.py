@@ -1,10 +1,11 @@
 # %%
 # This script demonstrates the damage recovery capabilities of the NonDoublingVNCA model
+from jax import vmap
 from jax.random import PRNGKey, split
 from models import NonDoublingVNCA
 from matplotlib import pyplot as plt
 from log_utils import restore_model, to_grid, to_PIL_img
-
+from functools import partial
 
 # %%
 # Load the model
@@ -57,5 +58,20 @@ for i, img, title in zip([1, 2, 3], [original_img, damaged_img, recovered_img], 
     plt.axis('off')
 plt.tight_layout()
 plt.show()
+
+# %%
+# Generate 80 steps and damage the 40th
+ih, iw = 10, 8
+T = 140
+damage_idx = {30, 70}
+N = ih * iw
+key = split(PRNGKey(2), num=N)
+out = vmap(partial(vnca_model.nca_stages, n_channels=1, T=T, damage_idx=damage_idx))(key=key)
+
+# %%
+array_of_grids = vmap(partial(to_grid, ih=ih, iw=iw), in_axes=1)(out)
+# %%
+images = [to_PIL_img(grid) for grid in array_of_grids]
+images[0].save('images/recovery.gif', save_all=True, append_images=images, loop=0)
 
 # %%
